@@ -304,13 +304,13 @@ const SCENES: readonly Scene[] = [
 // picture is already doing enough and a chord that resolves would argue with it.
 const SCORE = compile([
     // Three sustained FM voices for the drone, breathing an octave apart.
-    { voice: opllVoice(0), mml: "t150 @8 v11 l1 o3 [d e- d c]2" },
-    { voice: opllVoice(1), mml: "t150 @8 v9 l1 o4 [a b- a g]2" },
-    { voice: opllVoice(2), mml: "t150 @8 v8 l1 o4 [f g- f e-]2" },
+    { voice: opllVoice(0), mml: "t150 @5 v11 l1 o3 [d e- d c]2" },
+    { voice: opllVoice(1), mml: "t150 @5 v9 l1 o4 [a b- a g]2" },
+    { voice: opllVoice(2), mml: "t150 @5 v8 l1 o4 [f g- f e-]2" },
     // The fourth arpeggiates over the top in sixteenths, one bar per shape.
     {
         voice: opllVoice(3),
-        mml: "t150 @8 v10 l16 o5 [[dfad]4 [e-g-b-e-]4 [dfad]4 [cea c]4]2"
+        mml: "t150 @11 v10 l16 o5 [[dfad]4 [e-g-b-e-]4 [dfad]4 [cea c]4]2"
     },
     // PSG bass, where the FM chip is weakest, with the gate short enough to hear
     // each note stop. Root and fifth, four bars, twice.
