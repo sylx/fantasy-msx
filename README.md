@@ -41,25 +41,48 @@ same position an MSX program's VBlank handler occupies.
 | L2 BIOS | BGM library | M4 |
 | app | `init` / `update` / `draw` | M5 |
 
-### Why drawing is done in software
+### Drawing takes time, and you can see it
 
-Removing the Z80 makes TypeScript infinitely fast relative to the VDP: writing
-VRAM directly costs no emulated time at all, while the chip's own blitter still
-runs at 1988 speed. Measured on a full 256x212 screen:
+A real V9938 does not fill a screen between two frames. It grinds through the
+rectangle while the raster keeps sweeping, so you watch the fill arrive. That
+is half the character of the machine, and this console keeps it.
+
+WebMSX's own command engine writes the whole result the instant a command is
+issued and then merely holds its busy flag up - the slowness is real but
+invisible. So `gfx` runs its own blitter instead: calls queue jobs, and the
+queue is advanced from the CPU's time slices, about ten per scanline. Costs
+per pixel are measured against the emulated chip and land close to the V9938's
+published figures.
 
 | operation | covered in one frame |
 |-----------|---------------------|
-| `vdp.cmd.fill` (LMMV, per pixel) | 6% |
-| `vdp.cmd.copyBytes` (HMMM, per byte) | 27% |
-| `vdp.cmd.fillBytes` (HMMV, per byte) | 49% |
-| `gfx.clear` (TypeScript into VRAM) | 100%, and 0 cycles |
+| aligned fill (byte-wise, like HMMV) | 49% of the screen |
+| aligned copy (byte-wise, like HMMM) | 27% |
+| unaligned copy (pixel-wise, like LMMM) | 5% |
+| unaligned fill (pixel-wise, like LMMV) | 6% |
 
-So `gfx` writes VRAM itself. The blitter stays available through `vdp.cmd` for
-when its timing is the point.
+Even coordinates cost an eighth of odd ones, because the chip can move whole
+bytes instead of reading, masking and writing each pixel. It is worth
+arranging your rectangles to land on them.
 
-What the V9938 still does that software cannot undercut: 32 hardware sprites
-composited per scanline for free, a 512-colour palette, four framebuffer pages
-to flip between, and the scroll registers.
+Jobs run in the order they were queued, and each one pins the page and clip it
+was queued with, so a later page flip cannot make an unfinished fill paint over
+the wrong buffer.
+
+When something must land before the next frame - a HUD, a menu, the boot
+screen - `gfx.now` is the same set of primitives written straight into VRAM at
+no cost. It is the exception, not the default.
+
+Three clocks, then, and they do not fight:
+
+| | rate | cost |
+|---|------|------|
+| game logic | every frame | free |
+| sprite movement | every frame | free, the VDP composites per scanline |
+| blitter jobs | **spread across frames** | hardware speed |
+
+Which is why the framebuffer is persistent state here rather than something
+cleared every frame. Moving objects belong in the 32 hardware sprites.
 
 ## Using the low-level API
 
@@ -98,10 +121,11 @@ const { screen, gfx, sprites } = createBios();   // SCREEN 5, sprites enabled
 
 screen.useDoubleBuffer();                        // draw on page 1, show page 0
 
-gfx.clear(1);
-gfx.fillCircle(128, 106, 40, 10);
+gfx.now.clear(1);                                // instant: the boot screen
+gfx.fillCircle(128, 106, 40, 10);                // queued: arrives over a few frames
 gfx.rect(8, 8, 240, 196, 15);
 gfx.text(12, 12, "HELLO", 15);
+// gfx.busy / gfx.pending / gfx.work report what is still owed
 
 sprites.setPatternFromBitmap(0, [
     "..####..",

@@ -5,12 +5,12 @@ import { pixelAt } from "./helpers.js";
 
 const WHITE = 0xffffffff;
 
-describe("Graphics pixel packing", () => {
+describe("Raster pixel packing", () => {
     it("addresses both nibbles of a byte", () => {
         const { gfx, system } = createBios();
-        gfx.clear(0);
-        gfx.pixel(0, 0, 0x0a);      // high nibble
-        gfx.pixel(1, 0, 0x03);      // low nibble
+        gfx.now.clear(0);
+        gfx.now.pixel(0, 0, 0x0a);      // high nibble
+        gfx.now.pixel(1, 0, 0x03);      // low nibble
         expect(system.vdp.vram[0]).toBe(0xa3);
         expect(gfx.getPixel(0, 0)).toBe(0x0a);
         expect(gfx.getPixel(1, 0)).toBe(0x03);
@@ -18,8 +18,8 @@ describe("Graphics pixel packing", () => {
 
     it("fills a run that starts and ends mid-byte without touching its neighbours", () => {
         const { gfx, system } = createBios();
-        gfx.clear(0);
-        gfx.hline(1, 0, 4, 7);      // pixels 1..4, so bytes 0 and 2 are half-covered
+        gfx.now.clear(0);
+        gfx.now.hline(1, 0, 4, 7);      // pixels 1..4, so bytes 0 and 2 are half-covered
         expect(system.vdp.vram[0]).toBe(0x07);
         expect(system.vdp.vram[1]).toBe(0x77);
         expect(system.vdp.vram[2]).toBe(0x70);
@@ -28,20 +28,20 @@ describe("Graphics pixel packing", () => {
 
     it("clears only the page being drawn on", () => {
         const { gfx, screen, system } = createBios();
-        gfx.clear(0);
+        gfx.now.clear(0);
         screen.setDrawPage(1);
-        gfx.clear(0x0f);
+        gfx.now.clear(0x0f);
         expect(system.vdp.vram[0x0000]).toBe(0x00);
         expect(system.vdp.vram[0x8000]).toBe(0xff);
     });
 });
 
-describe("Graphics clipping", () => {
+describe("Raster clipping", () => {
     it("drops everything outside the clip rectangle", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
+        gfx.now.clear(0);
         gfx.setClip(10, 10, 4, 4);
-        gfx.fillRect(0, 0, 256, 212, 9);
+        gfx.now.fillRect(0, 0, 256, 212, 9);
 
         expect(gfx.getPixel(9, 10)).toBe(0);
         expect(gfx.getPixel(10, 10)).toBe(9);
@@ -56,11 +56,11 @@ describe("Graphics clipping", () => {
     });
 });
 
-describe("Graphics shapes", () => {
+describe("Raster shapes", () => {
     it("draws a rectangle outline one pixel thick", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
-        gfx.rect(4, 4, 10, 6, 15);
+        gfx.now.clear(0);
+        gfx.now.rect(4, 4, 10, 6, 15);
 
         expect(gfx.getPixel(4, 4)).toBe(15);
         expect(gfx.getPixel(13, 9)).toBe(15);
@@ -70,16 +70,16 @@ describe("Graphics shapes", () => {
 
     it("draws a line that reaches both endpoints", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
-        gfx.line(3, 5, 40, 30, 12);
+        gfx.now.clear(0);
+        gfx.now.line(3, 5, 40, 30, 12);
         expect(gfx.getPixel(3, 5)).toBe(12);
         expect(gfx.getPixel(40, 30)).toBe(12);
     });
 
     it("fills a circle without gaps along its widest row", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
-        gfx.fillCircle(40, 40, 10, 6);
+        gfx.now.clear(0);
+        gfx.now.fillCircle(40, 40, 10, 6);
         for (let x = 31; x <= 49; ++x) expect(gfx.getPixel(x, 40)).toBe(6);
         expect(gfx.getPixel(40, 30)).toBe(6);        // radius 10 above the centre
         expect(gfx.getPixel(40, 29)).toBe(0);
@@ -87,22 +87,22 @@ describe("Graphics shapes", () => {
 
     it("skips colour 0 when drawing an image, unless told not to", () => {
         const { gfx } = createBios();
-        gfx.clear(3);
-        gfx.drawImage(0, 0, 2, 2, [0, 5, 5, 0]);
+        gfx.now.clear(3);
+        gfx.now.drawImage(0, 0, 2, 2, [0, 5, 5, 0]);
         expect(gfx.getPixel(0, 0)).toBe(3);
         expect(gfx.getPixel(1, 0)).toBe(5);
 
-        gfx.drawImage(0, 0, 2, 2, [0, 5, 5, 0], false);
+        gfx.now.drawImage(0, 0, 2, 2, [0, 5, 5, 0], false);
         expect(gfx.getPixel(0, 0)).toBe(0);
     });
 });
 
-describe("Graphics blit", () => {
+describe("Raster blit", () => {
     it("copies a byte-aligned block a whole row at a time", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
-        gfx.fillRect(0, 0, 8, 4, 11);
-        gfx.blit(0, 0, 100, 50, 8, 4);
+        gfx.now.clear(0);
+        gfx.now.fillRect(0, 0, 8, 4, 11);
+        gfx.now.blit(0, 0, 100, 50, 8, 4);
         expect(gfx.getPixel(100, 50)).toBe(11);
         expect(gfx.getPixel(107, 53)).toBe(11);
         expect(gfx.getPixel(108, 53)).toBe(0);
@@ -111,32 +111,32 @@ describe("Graphics blit", () => {
     it("copies across pages, which is how a background gets restored", () => {
         const { gfx, screen } = createBios();
         screen.setDrawPage(1);
-        gfx.clear(0);
-        gfx.fillRect(20, 20, 16, 16, 4);        // background lives on page 1
+        gfx.now.clear(0);
+        gfx.now.fillRect(20, 20, 16, 16, 4);        // background lives on page 1
 
         screen.setDrawPage(0);
-        gfx.clear(0);
-        gfx.blit(20, 20, 20, 20, 16, 16, { fromPage: 1 });
+        gfx.now.clear(0);
+        gfx.now.blit(20, 20, 20, 20, 16, 16, { fromPage: 1 });
         expect(gfx.getPixel(20, 20)).toBe(4);
         expect(gfx.getPixel(35, 35)).toBe(4);
     });
 
     it("leaves colour 0 alone when copying with transparency", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
-        gfx.pixel(1, 0, 6);                     // source: one pixel set, one clear
-        gfx.fillRect(50, 50, 2, 1, 2);          // destination: both pixels set
-        gfx.blit(0, 0, 50, 50, 2, 1, { transparent: true });
+        gfx.now.clear(0);
+        gfx.now.pixel(1, 0, 6);                     // source: one pixel set, one clear
+        gfx.now.fillRect(50, 50, 2, 1, 2);          // destination: both pixels set
+        gfx.now.blit(0, 0, 50, 50, 2, 1, { transparent: true });
         expect(gfx.getPixel(50, 50)).toBe(2);   // kept
         expect(gfx.getPixel(51, 50)).toBe(6);   // overwritten
     });
 });
 
-describe("Graphics text", () => {
+describe("Raster text", () => {
     it("renders glyphs to the pixels the font describes", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
-        gfx.text(0, 0, "L", 15);
+        gfx.now.clear(0);
+        gfx.now.text(0, 0, "L", 15);
         // "L" is a full-height stem with a foot: column 0 set on every row,
         // the rest of the top row clear.
         for (let y = 0; y < 7; ++y) expect(gfx.getPixel(0, y)).toBe(15);
@@ -146,8 +146,8 @@ describe("Graphics text", () => {
 
     it("advances lines on a newline and reports its own width", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
-        gfx.text(0, 0, "A\nBC", 15);
+        gfx.now.clear(0);
+        gfx.now.text(0, 0, "A\nBC", 15);
         expect(gfx.getPixel(1, 0)).toBe(15);        // top of the A
         expect(gfx.getPixel(0, 8)).toBe(15);        // stem of the B, one line down
         expect(gfx.textWidth("A\nBC")).toBe(12);
@@ -155,8 +155,8 @@ describe("Graphics text", () => {
 
     it("fills the cell behind the text when given a background", () => {
         const { gfx } = createBios();
-        gfx.clear(0);
-        gfx.text(0, 0, " ", 15, 3);
+        gfx.now.clear(0);
+        gfx.now.text(0, 0, " ", 15, 3);
         expect(gfx.getPixel(0, 0)).toBe(3);
         expect(gfx.getPixel(5, 7)).toBe(3);
     });
@@ -169,7 +169,7 @@ describe("Screen pages", () => {
         expect(screen.displayPage).toBe(0);
         expect(screen.drawPage).toBe(1);
 
-        gfx.clear(15);                              // lands on page 1, not shown yet
+        gfx.now.clear(15);                              // lands on page 1, not shown yet
         screen.frame();
         expect(pixelAt(system.machine.getFrame()!, MODES.G4, 0, 0)).not.toBe(WHITE);
 
@@ -234,7 +234,7 @@ describe("Sprites", () => {
 
     it("actually reaches the screen", () => {
         const { gfx, sprites, screen, system } = createBios();
-        gfx.clear(0);
+        gfx.now.clear(0);
         sprites.setSize(8);
         sprites.setPattern(0, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
         sprites.set(0, { x: 64, y: 80, pattern: 0, color: 15 });
@@ -251,5 +251,122 @@ describe("Sprites", () => {
         const { sprites, system } = createBios();
         sprites.setActiveCount(4);
         expect(system.vdp.vram[SPRITE_ATTRIBUTE_TABLE + 4 * 4]).toBe(216);
+    });
+});
+
+describe("Blitter pacing", () => {
+    it("spreads a full-screen clear over the frames the chip would need", () => {
+        const { gfx, screen } = createBios();
+        gfx.now.clear(1);
+        gfx.clear(15);
+
+        const done = () => {
+            let lines = 0;
+            for (let y = 0; y < 212; ++y) if (gfx.getPixel(0, y) === 15) ++lines;
+            return lines;
+        };
+
+        expect(done()).toBe(0);             // queued, not drawn
+        screen.frame();
+        const afterOne = done();
+        expect(afterOne).toBeGreaterThan(50);
+        expect(afterOne).toBeLessThan(212); // and not finished either
+
+        while (gfx.busy) screen.frame();
+        expect(done()).toBe(212);
+    });
+
+    it("charges eight times as much for a fill that is not byte-aligned", () => {
+        const frames = (x: number, width: number) => {
+            const { gfx, screen } = createBios();
+            gfx.now.clear(0);
+            gfx.fillRect(x, 0, width, 40, 5);
+            let count = 0;
+            while (gfx.busy) { screen.frame(); ++count; }
+            return count;
+        };
+        expect(frames(1, 255)).toBeGreaterThan(frames(0, 256) * 3);
+    });
+
+    it("runs jobs in the order they were queued", () => {
+        const { gfx, screen } = createBios();
+        gfx.now.clear(0);
+        gfx.fillRect(0, 0, 64, 64, 4);
+        gfx.fillRect(0, 0, 64, 64, 9);      // overwrites the first, and must come second
+        expect(gfx.pending).toBe(2);
+
+        while (gfx.busy) screen.frame();
+        expect(gfx.getPixel(10, 10)).toBe(9);
+    });
+
+    it("pins a job to the page it was queued on", () => {
+        const { gfx, screen } = createBios();
+        screen.setDrawPage(0);
+        gfx.now.clear(0);
+        screen.setDrawPage(1);
+        gfx.now.clear(0);
+
+        screen.setDrawPage(0);
+        gfx.clear(7);                       // queued against page 0
+        screen.setDrawPage(1);              // ...then the draw page moves
+        while (gfx.busy) screen.frame();
+
+        expect(gfx.getPixel(0, 0, 0)).toBe(7);
+        expect(gfx.getPixel(0, 0, 1)).toBe(0);
+    });
+
+    it("pins a job to the clip it was queued with", () => {
+        const { gfx, screen } = createBios();
+        gfx.now.clear(0);
+        gfx.setClip(0, 0, 32, 32);
+        gfx.fillRect(0, 0, 256, 64, 3);
+        gfx.resetClip();                    // widened after queueing, too late for that job
+        while (gfx.busy) screen.frame();
+
+        expect(gfx.getPixel(31, 31)).toBe(3);
+        expect(gfx.getPixel(32, 31)).toBe(0);
+    });
+
+    it("draws nothing more once a queue is abandoned", () => {
+        const { gfx, screen } = createBios();
+        gfx.now.clear(0);
+        gfx.clear(11);
+        screen.frame();
+        const partial = gfx.getPixel(0, 100);
+        gfx.abandon();
+        expect(gfx.busy).toBe(false);
+
+        for (let i = 0; i < 4; ++i) screen.frame();
+        expect(gfx.getPixel(0, 100)).toBe(partial);
+    });
+
+    it("does not bank cycles while the queue is empty", () => {
+        const { gfx, screen } = createBios();
+        gfx.now.clear(0);
+        for (let i = 0; i < 30; ++i) screen.frame();     // half a second of idling
+
+        gfx.clear(2);
+        screen.frame();
+        expect(gfx.busy).toBe(true);                     // the idle time bought nothing
+    });
+
+    it("reports how much work is left", () => {
+        const { gfx, screen } = createBios();
+        gfx.now.clear(0);
+        gfx.clear(6);
+        const before = gfx.work;
+        expect(before).toBe(256 * 212);
+        screen.frame();
+        expect(gfx.work).toBeGreaterThan(0);
+        expect(gfx.work).toBeLessThan(before);
+    });
+
+    it("puts text on screen a line at a time", () => {
+        const { gfx, screen } = createBios();
+        gfx.now.clear(0);
+        gfx.text(0, 0, "HELLO WORLD", 15);
+        expect(gfx.busy).toBe(true);
+        while (gfx.busy) screen.frame();
+        for (let y = 0; y < 7; ++y) expect(gfx.getPixel(0, y)).toBe(15);   // stem of the H
     });
 });

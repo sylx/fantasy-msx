@@ -88,6 +88,12 @@ class CycleCounter {
     private cycles = 0;
     /** Raised while the VDP is asserting its interrupt line. */
     intPending = false;
+    /**
+     * Handed every slice of time the Z80 would have had, roughly ten times per
+     * scanline. This is where work that is supposed to take hardware time gets
+     * done a little at a time.
+     */
+    onCycles: ((cycles: number) => void) | null = null;
 
     constructor() {
         this.busClockPulses = this.busClockPulses.bind(this);
@@ -98,6 +104,7 @@ class CycleCounter {
 
     busClockPulses(quant: number): void {
         this.cycles += quant;
+        if (this.onCycles) this.onCycles(quant);
     }
 
     /** R800-only bookkeeping. A Z80-speed machine does nothing here. */
@@ -221,6 +228,19 @@ export class FantasyMachine {
     /** True while the VDP is asserting the vertical interrupt line. */
     get interruptPending(): boolean {
         return this.cpu.intPending;
+    }
+
+    /**
+     * Subscribes to the CPU's time slices - about ten per scanline, 2620 per
+     * frame. Anything that should visibly take hardware time advances here
+     * rather than all at once.
+     */
+    set onCycles(consumer: ((cycles: number) => void) | null) {
+        this.cpu.onCycles = consumer;
+    }
+
+    get onCycles(): ((cycles: number) => void) | null {
+        return this.cpu.onCycles;
     }
 
     /** Pulls the accumulated audio for the last frame from every connected chip. */

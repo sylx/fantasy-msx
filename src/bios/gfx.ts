@@ -1,52 +1,67 @@
-// Drawing.
+// Drawing, as the machine actually does it.
 //
-// Everything here writes VRAM directly. With TypeScript in the CPU's seat that
-// costs no emulated time, which makes software rendering strictly faster than
-// the V9938's blitter - a full-screen clear that the chip needs three frames
-// for happens here inside one. The blitter is still reachable through
-// `vdp.cmd` when you want the hardware's own timing.
+// Every call here queues work for the blitter, which grinds through it at the
+// V9938's own pace - a full-screen clear takes about two frames and you watch
+// it arrive. That is the point: the slowness is the character of the machine,
+// not a defect to hide.
 //
-// Coordinates are pixels in the current mode. GRAPHIC4 packs two pixels per
-// byte, the left one in the high nibble, 128 bytes to a line.
+// When something must land before the next frame - a HUD, a menu, the initial
+// screen - reach for `gfx.now`, which is the same set of primitives written
+// straight into VRAM at no cost. Use it deliberately; it is the exception.
 
-import type { Vdp } from "../api/index.js";
+import { Blitter, CopyJob, FillJob, LineJob, PointsJob, TransferJob } from "./blitter.js";
 import { CHAR_HEIGHT, CHAR_WIDTH, FONT, glyphOffset } from "./font.js";
+import type { BlitOptions, Raster, Rect } from "./raster.js";
 import type { Screen } from "./screen.js";
 
-export interface Rect {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-}
-
-export interface BlitOptions {
-    /** Skip source pixels of colour 0 instead of copying them. */
-    transparent?: boolean;
-    /** Page to read from. Defaults to the page being drawn on. */
-    fromPage?: number;
-}
-
 export class Graphics {
-    private readonly vram: Uint8Array;
     private clipRect: Rect;
 
-    constructor(private readonly vdp: Vdp, private readonly screen: Screen) {
-        this.vram = vdp.vram;
+    constructor(
+        private readonly screen: Screen,
+        private readonly blitter: Blitter,
+        private readonly immediate: Raster
+    ) {
         this.clipRect = { x: 0, y: 0, width: screen.width, height: screen.height };
     }
 
-    private get base(): number {
-        return this.screen.pageBase(this.screen.drawPage);
+    /**
+     * The same primitives, drawn immediately and for free. Everything it draws
+     * is already on the page when it returns.
+     */
+    get now(): Raster {
+        this.immediate.setTarget(this.pageBase(), this.clipRect);
+        return this.immediate;
     }
 
-    private get stride(): number {
-        return this.screen.mode.bytesPerLine;
+    // --- Queue state ------------------------------------------------------
+
+    /** True while the blitter still has work. */
+    get busy(): boolean {
+        return this.blitter.busy;
+    }
+
+    /** Queued jobs, including the one in progress. */
+    get pending(): number {
+        return this.blitter.pending;
+    }
+
+    /** Pixels left to draw across the whole queue. */
+    get work(): number {
+        return this.blitter.work;
+    }
+
+    /** Drops everything queued. Whatever was half-drawn stays half-drawn. */
+    abandon(): void {
+        this.blitter.abandon();
     }
 
     // --- Clipping ---------------------------------------------------------
 
-    /** Restricts drawing to a rectangle. Everything outside is left untouched. */
+    /**
+     * Restricts drawing to a rectangle. Jobs capture the clip as they are
+     * queued, so changing it later does not disturb work already in flight.
+     */
     setClip(x: number, y: number, width: number, height: number): void {
         const x0 = Math.max(0, x);
         const y0 = Math.max(0, y);
@@ -68,186 +83,111 @@ export class Graphics {
 
     // --- Primitives -------------------------------------------------------
 
-    /** Fills the whole page, ignoring the clip rectangle. */
     clear(color = 0): void {
-        const start = this.base;
-        this.vram.fill((color & 0x0f) * 0x11, start, start + this.screen.height * this.stride);
+        this.blitter.push(new FillJob(
+            this.pageBase(), this.fullPage(), 0, 0, this.screen.width, this.screen.height, color
+        ));
     }
 
     pixel(x: number, y: number, color: number): void {
-        const c = this.clipRect;
-        if (x < c.x || y < c.y || x >= c.x + c.width || y >= c.y + c.height) return;
-        this.writePixel(this.base + y * this.stride + (x >> 1), x, color);
+        this.blitter.push(new PointsJob(this.pageBase(), this.capture(), Int32Array.of(x, y), color));
     }
 
+    /** Reads a pixel back. Reads are free and immediate; only drawing is not. */
     getPixel(x: number, y: number, page = this.screen.drawPage): number {
-        if (x < 0 || y < 0 || x >= this.screen.width || y >= this.screen.height) return 0;
-        const byte = this.vram[this.screen.pageBase(page) + y * this.stride + (x >> 1)];
-        return x & 1 ? byte & 0x0f : byte >> 4;
+        return this.now.getPixel(x, y, page);
     }
 
-    /** Horizontal run. The middle is filled a byte at a time, the ends by nibble. */
     hline(x: number, y: number, width: number, color: number): void {
-        const c = this.clipRect;
-        if (y < c.y || y >= c.y + c.height) return;
-
-        let x0 = Math.max(x, c.x);
-        const x1 = Math.min(x + width, c.x + c.width);     // exclusive
-        if (x0 >= x1) return;
-
-        const row = this.base + y * this.stride;
-        const nibble = color & 0x0f;
-
-        if (x0 & 1) {                                       // leading half byte
-            this.writePixel(row + (x0 >> 1), x0, nibble);
-            ++x0;
-        }
-        let end = x1;
-        if (end & 1) {                                      // trailing half byte
-            --end;
-            this.writePixel(row + (end >> 1), end, nibble);
-        }
-        if (x0 < end) this.vram.fill(nibble * 0x11, row + (x0 >> 1), row + (end >> 1));
+        this.fillRect(x, y, width, 1, color);
     }
 
     vline(x: number, y: number, height: number, color: number): void {
-        const c = this.clipRect;
-        if (x < c.x || x >= c.x + c.width) return;
-
-        const y0 = Math.max(y, c.y);
-        const y1 = Math.min(y + height, c.y + c.height);
-        let address = this.base + y0 * this.stride + (x >> 1);
-        for (let i = y0; i < y1; ++i, address += this.stride) this.writePixel(address, x, color);
+        this.fillRect(x, y, 1, height, color);
     }
 
+    /**
+     * A solid rectangle. Even `x` and `width` let the chip move whole bytes,
+     * which is eight times faster - worth arranging when you can.
+     */
     fillRect(x: number, y: number, width: number, height: number, color: number): void {
-        for (let i = 0; i < height; ++i) this.hline(x, y + i, width, color);
+        this.blitter.push(new FillJob(this.pageBase(), this.capture(), x, y, width, height, color));
     }
 
-    /** Outline only, one pixel thick, drawn inside the given rectangle. */
     rect(x: number, y: number, width: number, height: number, color: number): void {
         if (width <= 0 || height <= 0) return;
-        this.hline(x, y, width, color);
-        this.hline(x, y + height - 1, width, color);
-        this.vline(x, y + 1, height - 2, color);
-        this.vline(x + width - 1, y + 1, height - 2, color);
+        this.fillRect(x, y, width, 1, color);
+        this.fillRect(x, y + height - 1, width, 1, color);
+        this.fillRect(x, y + 1, 1, height - 2, color);
+        this.fillRect(x + width - 1, y + 1, 1, height - 2, color);
     }
 
     line(x0: number, y0: number, x1: number, y1: number, color: number): void {
-        // Horizontal and vertical runs are common enough to be worth the shortcut.
-        if (y0 === y1) return this.hline(Math.min(x0, x1), y0, Math.abs(x1 - x0) + 1, color);
-        if (x0 === x1) return this.vline(x0, Math.min(y0, y1), Math.abs(y1 - y0) + 1, color);
-
-        const dx = Math.abs(x1 - x0);
-        const dy = -Math.abs(y1 - y0);
-        const sx = x0 < x1 ? 1 : -1;
-        const sy = y0 < y1 ? 1 : -1;
-        let error = dx + dy;
-
-        for (;;) {
-            this.pixel(x0, y0, color);
-            if (x0 === x1 && y0 === y1) return;
-            const e2 = error * 2;
-            if (e2 >= dy) { error += dy; x0 += sx; }
-            if (e2 <= dx) { error += dx; y0 += sy; }
-        }
+        this.blitter.push(new LineJob(this.pageBase(), this.capture(), x0, y0, x1, y1, color));
     }
 
     circle(cx: number, cy: number, radius: number, color: number): void {
-        this.walkCircle(radius, (dx, dy) => {
-            this.pixel(cx + dx, cy + dy, color);
-            this.pixel(cx - dx, cy + dy, color);
-            this.pixel(cx + dx, cy - dy, color);
-            this.pixel(cx - dx, cy - dy, color);
+        const points: number[] = [];
+        walkCircle(radius, (dx, dy) => {
+            points.push(cx + dx, cy + dy, cx - dx, cy + dy, cx + dx, cy - dy, cx - dx, cy - dy);
         });
+        this.blitter.push(new PointsJob(this.pageBase(), this.capture(), Int32Array.from(points), color));
     }
 
     fillCircle(cx: number, cy: number, radius: number, color: number): void {
-        let lastY = -1;
-        this.walkCircle(radius, (dx, dy) => {
-            if (dy === lastY) return;                       // one span per scanline
-            lastY = dy;
-            this.hline(cx - dx, cy + dy, dx * 2 + 1, color);
-            if (dy !== 0) this.hline(cx - dx, cy - dy, dx * 2 + 1, color);
+        // The midpoint walk reports offsets by octant, which would make the
+        // circle arrive in scattered bands. Collect the spans and queue them
+        // top to bottom so it fills the way a scanline fill looks.
+        const spans = new Map<number, number>();
+        walkCircle(radius, (dx, dy) => {
+            spans.set(cy + dy, Math.max(spans.get(cy + dy) ?? 0, dx));
+            spans.set(cy - dy, Math.max(spans.get(cy - dy) ?? 0, dx));
         });
+
+        const base = this.pageBase();
+        const clip = this.capture();
+        for (const y of [...spans.keys()].sort((a, b) => a - b)) {
+            const dx = spans.get(y)!;
+            this.blitter.push(new FillJob(base, clip, cx - dx, y, dx * 2 + 1, 1, color));
+        }
     }
 
-    // --- Bulk moves -------------------------------------------------------
-
     /**
-     * Copies a rectangle of VRAM. Source and destination may overlap, and
-     * `fromPage` lets you pull from a page you are not drawing on - which is
-     * how a background gets restored under a moving object.
+     * Moves a rectangle of VRAM. `fromPage` pulls from a page you are not
+     * drawing on, which is how a background gets restored under something that
+     * has moved.
      */
     blit(sx: number, sy: number, dx: number, dy: number, width: number, height: number, options: BlitOptions = {}): void {
-        const from = this.screen.pageBase(options.fromPage ?? this.screen.drawPage);
-        const to = this.base;
-        const stride = this.stride;
-
-        // Byte-aligned, opaque copies move whole rows at a time.
-        const aligned = !options.transparent && (sx & 1) === 0 && (dx & 1) === 0 && (width & 1) === 0;
-        const down = dy > sy;                               // walk away from the overlap
-
-        for (let i = 0; i < height; ++i) {
-            const row = down ? height - 1 - i : i;
-            const source = from + (sy + row) * stride;
-            const dest = to + (dy + row) * stride;
-            if (dy + row < 0 || dy + row >= this.screen.height) continue;
-
-            if (aligned) {
-                this.vram.copyWithin(dest + (dx >> 1), source + (sx >> 1), source + ((sx + width) >> 1));
-            } else {
-                for (let j = 0; j < width; ++j) {
-                    const k = down ? width - 1 - j : j;
-                    const value = this.readPixel(source, sx + k);
-                    if (options.transparent && value === 0) continue;
-                    this.pixel(dx + k, dy + row, value);
-                }
-            }
-        }
+        const source = this.screen.pageBase(options.fromPage ?? this.screen.drawPage);
+        this.blitter.push(new CopyJob(
+            this.pageBase(), this.capture(), source, sx, sy, dx, dy, width, height, !!options.transparent
+        ));
     }
 
-    /**
-     * Draws an image given one byte per pixel. This is the format to author
-     * sprites and tiles in - readable, and unpacked at draw time.
-     */
+    /** Draws an image given one byte per pixel - the format to author art in. */
     drawImage(x: number, y: number, width: number, height: number, pixels: ArrayLike<number>, transparent = true): void {
-        for (let row = 0; row < height; ++row) {
-            for (let column = 0; column < width; ++column) {
-                const color = pixels[row * width + column] & 0x0f;
-                if (transparent && color === 0) continue;
-                this.pixel(x + column, y + row, color);
-            }
-        }
+        this.blitter.push(new TransferJob(this.pageBase(), this.capture(), x, y, width, height, pixels, transparent));
     }
 
-    // --- Text -------------------------------------------------------------
-
     /**
-     * Draws a string in the built-in 6x8 font. Passing `background` fills the
-     * cell behind each character; leaving it out draws the glyphs only.
+     * Draws a string in the built-in 6x8 font. The glyphs are rasterised now
+     * and pushed to VRAM by the blitter, so a long line arrives left to right.
      */
     text(x: number, y: number, text: string, color = 15, background?: number): void {
-        let cursorX = x;
-        let cursorY = y;
+        const base = this.pageBase();
+        const clip = this.capture();
+        let line = 0;
 
-        for (const character of text) {
-            if (character === "\n") {
-                cursorX = x;
-                cursorY += CHAR_HEIGHT;
-                continue;
+        for (const source of text.split("\n")) {
+            if (source.length > 0) {
+                this.blitter.push(new TransferJob(
+                    base, clip, x, y + line * CHAR_HEIGHT,
+                    source.length * CHAR_WIDTH, CHAR_HEIGHT,
+                    rasteriseText(source, color, background),
+                    background === undefined
+                ));
             }
-
-            if (background !== undefined) this.fillRect(cursorX, cursorY, CHAR_WIDTH, CHAR_HEIGHT, background);
-
-            const glyph = glyphOffset(character.charCodeAt(0));
-            for (let row = 0; row < CHAR_HEIGHT; ++row) {
-                let bits = FONT[glyph + row];
-                for (let column = 0; bits; ++column, bits = (bits << 1) & 0xff) {
-                    if (bits & 0x80) this.pixel(cursorX + column, cursorY + row, color);
-                }
-            }
-            cursorX += CHAR_WIDTH;
+            ++line;
         }
     }
 
@@ -258,30 +198,50 @@ export class Graphics {
         return longest * CHAR_WIDTH;
     }
 
-    // --- Nibble plumbing ---------------------------------------------------
+    // --- Internals --------------------------------------------------------
 
-    private writePixel(address: number, x: number, color: number): void {
-        this.vram[address] = x & 1
-            ? (this.vram[address] & 0xf0) | (color & 0x0f)
-            : (this.vram[address] & 0x0f) | ((color & 0x0f) << 4);
+    private pageBase(): number {
+        return this.screen.pageBase(this.screen.drawPage);
     }
 
-    private readPixel(rowAddress: number, x: number): number {
-        const byte = this.vram[rowAddress + (x >> 1)];
-        return x & 1 ? byte & 0x0f : byte >> 4;
+    /** Snapshots the clip so a job is unaffected by later changes. */
+    private capture(): Rect {
+        return { ...this.clipRect };
     }
 
-    /** Midpoint circle, reporting one octant's worth of offsets mirrored eight ways. */
-    private walkCircle(radius: number, plot: (dx: number, dy: number) => void): void {
-        let x = radius;
-        let y = 0;
-        let error = 1 - radius;
-        while (x >= y) {
-            plot(x, y);
-            plot(y, x);
-            ++y;
-            if (error < 0) error += 2 * y + 1;
-            else { --x; error += 2 * (y - x) + 1; }
+    private fullPage(): Rect {
+        return { x: 0, y: 0, width: this.screen.width, height: this.screen.height };
+    }
+}
+
+/** Renders a string into one byte per pixel, ready to be transferred. */
+function rasteriseText(text: string, color: number, background?: number): Uint8Array {
+    const width = text.length * CHAR_WIDTH;
+    const pixels = new Uint8Array(width * CHAR_HEIGHT);
+    if (background !== undefined) pixels.fill(background & 0x0f);
+
+    for (let i = 0; i < text.length; ++i) {
+        const glyph = glyphOffset(text.charCodeAt(i));
+        for (let row = 0; row < CHAR_HEIGHT; ++row) {
+            let bits = FONT[glyph + row];
+            for (let column = 0; bits; ++column, bits = (bits << 1) & 0xff) {
+                if (bits & 0x80) pixels[row * width + i * CHAR_WIDTH + column] = color & 0x0f;
+            }
         }
+    }
+    return pixels;
+}
+
+/** Midpoint circle, reporting one octant's offsets for the caller to mirror. */
+function walkCircle(radius: number, plot: (dx: number, dy: number) => void): void {
+    let x = radius;
+    let y = 0;
+    let error = 1 - radius;
+    while (x >= y) {
+        plot(x, y);
+        plot(y, x);
+        ++y;
+        if (error < 0) error += 2 * y + 1;
+        else { --x; error += 2 * (y - x) + 1; }
     }
 }
