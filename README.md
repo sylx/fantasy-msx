@@ -156,10 +156,19 @@ Sprite colours may be given per line, which is a V9938 feature with no
 equivalent on an MSX1: one sprite, shaded, instead of two stacked.
 
 
-## INK
+## Examples
 
-`examples/` holds a game rather than a demo, because the machine's oddities only
-make sense once something is built out of them.
+```bash
+npm run dev
+```
+
+The page is a launcher: each example gets a machine of its own, and the one on
+screen is in the URL fragment. `examples/registry.ts` is the list.
+
+### INK
+
+A game, because the machine's oddities only make sense once something is built
+out of them.
 
 You fly a ship and spray paint. Painted ground kills the drifters, but paint
 arrives over several frames, so you lay it where a drifter is *going*. The
@@ -170,8 +179,20 @@ the status bar is `gfx.work`: the blitter's backlog, doubling as your reload.
 Every actor is a hardware sprite, so none of them cost anything. The music is
 MML on the PSG and OPLL, and firing borrows a PSG channel for the spray.
 
+### WIRE
+
+A demo, showing the machine at its widest. SCREEN 7 is 512x212 in 16 colours out
+of 512, with two 64KB pages to flip between. An icosahedron, a ground plane and
+thirty edges are redrawn whole every frame, on the page that is not being shown.
+
+Nothing here is a sprite and nothing goes through the blitter. Line art at 512
+across is more pixels than the chip could push in a frame, and with TypeScript
+in the CPU's seat, drawing it in software is free. Four FM voices hold the
+chords over a PSG bass.
+
 ```bash
-npm run dev
+npm run play -- out.png     # INK, headless, with a scripted controller
+npm run wire -- out.png     # WIRE, four frames of it
 ```
 
 ## Writing a game

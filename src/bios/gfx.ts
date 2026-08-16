@@ -15,22 +15,21 @@ import type { BlitOptions, Raster, Rect } from "./raster.js";
 import type { Screen } from "./screen.js";
 
 export class Graphics {
-    private clipRect: Rect;
+    /** Null means "the whole screen", which follows the mode when it changes. */
+    private clipRect: Rect | null = null;
 
     constructor(
         private readonly screen: Screen,
         private readonly blitter: Blitter,
         private readonly immediate: Raster
-    ) {
-        this.clipRect = { x: 0, y: 0, width: screen.width, height: screen.height };
-    }
+    ) {}
 
     /**
      * The same primitives, drawn immediately and for free. Everything it draws
      * is already on the page when it returns.
      */
     get now(): Raster {
-        this.immediate.setTarget(this.pageBase(), this.clipRect);
+        this.immediate.setTarget(this.pageBase(), this.clip);
         return this.immediate;
     }
 
@@ -85,12 +84,13 @@ export class Graphics {
         };
     }
 
+    /** Goes back to the whole screen, and keeps following it across mode changes. */
     resetClip(): void {
-        this.setClip(0, 0, this.screen.width, this.screen.height);
+        this.clipRect = null;
     }
 
     get clip(): Readonly<Rect> {
-        return this.clipRect;
+        return this.clipRect ?? this.fullPage();
     }
 
     // --- Primitives -------------------------------------------------------
@@ -218,7 +218,7 @@ export class Graphics {
 
     /** Snapshots the clip so a job is unaffected by later changes. */
     private capture(): Rect {
-        return { ...this.clipRect };
+        return { ...this.clip };
     }
 
     private fullPage(): Rect {

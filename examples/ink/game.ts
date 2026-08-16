@@ -9,7 +9,7 @@
 
 import {
     BUTTON, compile, opllVoice, psgVoice, rhythmVoice, type App, type Context
-} from "../src/index.js";
+} from "../../src/index.js";
 
 // --- The machine's fixed bits ------------------------------------------------
 

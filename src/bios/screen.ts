@@ -4,19 +4,38 @@
 // uses 0x6A00. The spare 0x1600 at the top of page 0 holds the sprite tables,
 // which stay put while the framebuffer pages flip beneath them.
 
-import { R, type ScreenModeName, type Vdp } from "../api/index.js";
+import { type ScreenModeName, type Vdp } from "../api/index.js";
 import type { FantasyMachine } from "../core/machine.js";
 
-/** Sprite tables live in the tail of page 0, out of the way of every framebuffer. */
-export const SPRITE_COLOR_TABLE = 0x07400;
-export const SPRITE_ATTRIBUTE_TABLE = 0x07600;
-export const SPRITE_PATTERN_TABLE = 0x07800;
+/**
+ * Where the sprite tables sit inside page 0, measured back from the end of it.
+ * A 256x212 image never fills a page - SCREEN 5 uses 0x6A00 of 0x8000, SCREEN 7
+ * 0xD400 of 0x10000 - and this is the gap that leaves.
+ */
+const SPRITE_TABLE_OFFSET = 0x0c00;
+
+export interface SpriteTables {
+    /** In sprite mode 2 this holds the per-line colours; attributes follow it. */
+    readonly colors: number;
+    readonly attributes: number;
+    readonly patterns: number;
+}
 
 export class Screen {
     private display = 0;
     private draw = 0;
+    private tables: SpriteTables = spriteTablesFor(0x8000);
 
     constructor(private readonly vdp: Vdp, private readonly machine: FantasyMachine) {}
+
+    /**
+     * Where the sprite tables live. They stay put in page 0 while the
+     * framebuffer pages flip beneath them, but they do move when the mode
+     * changes - a SCREEN 7 page is twice as long as a SCREEN 5 one.
+     */
+    get spriteTables(): SpriteTables {
+        return this.tables;
+    }
 
     /**
      * Sets up a bitmap screen. Geometry reaches the raster at the next vertical
@@ -24,12 +43,13 @@ export class Screen {
      */
     setMode(name: ScreenModeName = "G4"): void {
         this.vdp.setMode(name, 0);
+        this.tables = spriteTablesFor(this.vdp.mode.pageSize || 0x8000);
         this.vdp.setTables({
             layout: 0,
             colors: 0,
             patterns: 0,
-            spriteAttributes: SPRITE_COLOR_TABLE,   // attributes sit 512 bytes later
-            spritePatterns: SPRITE_PATTERN_TABLE
+            spriteAttributes: this.tables.colors,   // attributes sit 512 bytes later
+            spritePatterns: this.tables.patterns
         });
         this.vdp.setDisplayEnabled(true);
         this.display = 0;
@@ -64,9 +84,9 @@ export class Screen {
     /** Points the raster at a page. Only R2 moves; the sprite tables stay where they are. */
     setDisplayPage(page: number): void {
         this.display = page % this.vdp.mode.pages;
-        const address = this.pageBase(this.display);
-        // R2's unused bits must stay 1, exactly as setTables() computes them.
-        this.vdp.write(R.LAYOUT_TABLE, ((address >> 10) & 0x60) | 0x1f);
+        // Let the VDP work out R2: which of its bits carry the address, and
+        // which have to be written as ones, differs by mode.
+        this.vdp.setLayoutAddress(this.pageBase(this.display));
     }
 
     /** Chooses which page drawing lands in. Independent of what is displayed. */
@@ -116,4 +136,10 @@ export class Screen {
     frame(): void {
         this.machine.frame();
     }
+}
+
+/** Sprite tables for a mode with pages of `pageSize`, placed in the tail of page 0. */
+function spriteTablesFor(pageSize: number): SpriteTables {
+    const base = pageSize - SPRITE_TABLE_OFFSET;
+    return { colors: base, attributes: base + 0x200, patterns: base + 0x400 };
 }

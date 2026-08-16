@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MODES, R } from "../src/api/index.js";
-import { createBios, SPRITE_ATTRIBUTE_TABLE, SPRITE_COLOR_TABLE, SPRITE_PATTERN_TABLE } from "../src/bios/index.js";
+import { createBios } from "../src/bios/index.js";
 import { pixelAt } from "./helpers.js";
 
 const WHITE = 0xffffffff;
@@ -192,44 +192,44 @@ describe("Screen pages", () => {
 
 describe("Sprites", () => {
     it("stores a sprite one line above where it appears", () => {
-        const { sprites, system } = createBios();
+        const { sprites, system, screen } = createBios();
         sprites.set(3, { x: 40, y: 100, pattern: 8, color: 6 });
-        const attribute = SPRITE_ATTRIBUTE_TABLE + 3 * 4;
+        const attribute = screen.spriteTables.attributes + 3 * 4;
         expect(system.vdp.vram[attribute]).toBe(99);
         expect(system.vdp.vram[attribute + 1]).toBe(40);
         expect(system.vdp.vram[attribute + 2]).toBe(8);
-        expect(system.vdp.vram[SPRITE_COLOR_TABLE + 3 * 16]).toBe(6);
+        expect(system.vdp.vram[screen.spriteTables.colors + 3 * 16]).toBe(6);
     });
 
     it("rounds a 16x16 sprite's pattern down to a multiple of four", () => {
-        const { sprites, system } = createBios();
+        const { sprites, system, screen } = createBios();
         sprites.setSize(16);
         sprites.set(0, { x: 0, y: 0, pattern: 7, color: 1 });
-        expect(system.vdp.vram[SPRITE_ATTRIBUTE_TABLE + 2]).toBe(4);
+        expect(system.vdp.vram[screen.spriteTables.attributes + 2]).toBe(4);
     });
 
     it("splits a 16-wide pattern into the halves the chip expects", () => {
-        const { sprites, system } = createBios();
+        const { sprites, system, screen } = createBios();
         sprites.setPattern(0, [0xff00, 0x00ff, ...new Array(14).fill(0)]);
-        expect(system.vdp.vram[SPRITE_PATTERN_TABLE]).toBe(0xff);        // left half, row 0
-        expect(system.vdp.vram[SPRITE_PATTERN_TABLE + 16]).toBe(0x00);   // right half, row 0
-        expect(system.vdp.vram[SPRITE_PATTERN_TABLE + 1]).toBe(0x00);    // left half, row 1
-        expect(system.vdp.vram[SPRITE_PATTERN_TABLE + 17]).toBe(0xff);   // right half, row 1
+        expect(system.vdp.vram[screen.spriteTables.patterns]).toBe(0xff);        // left half, row 0
+        expect(system.vdp.vram[screen.spriteTables.patterns + 16]).toBe(0x00);   // right half, row 0
+        expect(system.vdp.vram[screen.spriteTables.patterns + 1]).toBe(0x00);    // left half, row 1
+        expect(system.vdp.vram[screen.spriteTables.patterns + 17]).toBe(0xff);   // right half, row 1
     });
 
     it("reads a bitmap left to right", () => {
-        const { sprites, system } = createBios();
+        const { sprites, system, screen } = createBios();
         sprites.setPatternFromBitmap(0, ["#.......", "......##", "........", "........", "........", "........", "........", "........"]);
-        expect(system.vdp.vram[SPRITE_PATTERN_TABLE]).toBe(0x80);
-        expect(system.vdp.vram[SPRITE_PATTERN_TABLE + 1]).toBe(0x03);
+        expect(system.vdp.vram[screen.spriteTables.patterns]).toBe(0x80);
+        expect(system.vdp.vram[screen.spriteTables.patterns + 1]).toBe(0x03);
     });
 
     it("gives each line of a sprite its own colour", () => {
-        const { sprites, system } = createBios();
+        const { sprites, system, screen } = createBios();
         sprites.setLineColors(0, [1, 2, 3, 4]);
-        expect(system.vdp.vram[SPRITE_COLOR_TABLE + 0]).toBe(1);
-        expect(system.vdp.vram[SPRITE_COLOR_TABLE + 3]).toBe(4);
-        expect(system.vdp.vram[SPRITE_COLOR_TABLE + 4]).toBe(0);
+        expect(system.vdp.vram[screen.spriteTables.colors + 0]).toBe(1);
+        expect(system.vdp.vram[screen.spriteTables.colors + 3]).toBe(4);
+        expect(system.vdp.vram[screen.spriteTables.colors + 4]).toBe(0);
     });
 
     it("actually reaches the screen", () => {
@@ -248,9 +248,9 @@ describe("Sprites", () => {
     });
 
     it("stops the chip after the last active sprite", () => {
-        const { sprites, system } = createBios();
+        const { sprites, system, screen } = createBios();
         sprites.setActiveCount(4);
-        expect(system.vdp.vram[SPRITE_ATTRIBUTE_TABLE + 4 * 4]).toBe(216);
+        expect(system.vdp.vram[screen.spriteTables.attributes + 4 * 4]).toBe(216);
     });
 });
 
@@ -394,5 +394,58 @@ describe("Blitter speed", () => {
         expect(() => { gfx.speed = 0; }).toThrow(RangeError);
         expect(() => { gfx.speed = -1; }).toThrow(RangeError);
         expect(gfx.speed).toBe(1);
+    });
+});
+
+describe("Screen modes with different page sizes", () => {
+    it("moves the sprite tables into the tail of the new page", () => {
+        const { screen } = createBios();
+        // SCREEN 5 pages are 0x8000; the image uses 0x6A00 of that.
+        expect(screen.spriteTables).toEqual({ colors: 0x7400, attributes: 0x7600, patterns: 0x7800 });
+
+        // SCREEN 7 pages are twice as long, so the tables move with them -
+        // left where they were they would sit inside the picture.
+        screen.setMode("G6");
+        expect(screen.spriteTables).toEqual({ colors: 0xf400, attributes: 0xf600, patterns: 0xf800 });
+        expect(screen.spriteTables.colors).toBeGreaterThan(screen.height * screen.mode.bytesPerLine);
+    });
+
+    it("flips pages in an interleaved mode, where R2 is shifted differently", () => {
+        const { screen, gfx, system } = createBios();
+        screen.setMode("G6");
+        screen.frame();
+
+        expect(screen.mode.pages).toBe(2);
+        expect(system.vdp.read(R.LAYOUT_TABLE)).toBe(0x1f);
+        screen.setDisplayPage(1);
+        expect(system.vdp.read(R.LAYOUT_TABLE)).toBe(0x3f);
+        expect(screen.pageBase(1)).toBe(0x10000);
+
+        screen.setDrawPage(1);
+        gfx.now.clear(9);
+        expect(system.vdp.vram[0x10000]).toBe(0x99);
+        expect(system.vdp.vram[0x00000]).not.toBe(0x99);
+    });
+
+    it("widens the default clip when the mode gets wider", () => {
+        const { screen, gfx } = createBios();
+        expect(gfx.clip.width).toBe(256);
+
+        screen.setMode("G6");
+        expect(gfx.clip.width).toBe(512);
+
+        // Painting the far right of a SCREEN 7 line has to reach VRAM.
+        gfx.now.clear(0);
+        gfx.now.pixel(511, 3, 12);
+        expect(gfx.getPixel(511, 3)).toBe(12);
+    });
+
+    it("keeps an explicit clip across a mode change", () => {
+        const { screen, gfx } = createBios();
+        gfx.setClip(0, 0, 100, 100);
+        screen.setMode("G6");
+        expect(gfx.clip.width).toBe(100);
+        gfx.resetClip();
+        expect(gfx.clip.width).toBe(512);
     });
 });

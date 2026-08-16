@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BUTTON, boot, HeadlessHost, Input, type App, type Context } from "../src/index.js";
-import { game } from "../examples/game.js";
+import { game } from "../examples/ink/game.js";
 
 describe("Runtime", () => {
     it("runs init once, then update and draw every frame", () => {

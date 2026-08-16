@@ -13,7 +13,8 @@
     "demo": "vite-node tools/demo.ts",
     "play": "vite-node tools/play.ts",
     "sound": "vite-node tools/sound.ts",
-    "music": "vite-node tools/music.ts"
+    "music": "vite-node tools/music.ts",
+    "wire": "vite-node tools/wire.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

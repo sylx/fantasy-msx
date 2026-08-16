@@ -160,6 +160,17 @@ export class Vdp {
         this.write(R.SPRITE_PATTERN_TABLE, tableRegister(layout.spritePatterns, masks.spritePatterns, 11, 0x3f));
     }
 
+    /**
+     * Moves the pattern layout table - the framebuffer, in a bitmap mode -
+     * without disturbing the other tables. This is how a page flip is done.
+     */
+    setLayoutAddress(address: number): void {
+        this.layout = { ...this.layout, layout: address };
+        const shift = this.currentMode.interleaved ? 11 : 10;
+        const width = this.currentMode.interleaved ? 0x3f : 0x7f;
+        this.write(R.LAYOUT_TABLE, tableRegister(address, this.currentMode.tableMasks.layout, shift, width));
+    }
+
     /** Address of the first byte of `line` in the current bitmap page. */
     lineAddress(line: number): number {
         return this.layout.layout + line * this.currentMode.bytesPerLine;

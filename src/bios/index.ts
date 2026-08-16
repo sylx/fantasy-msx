@@ -11,7 +11,7 @@ import { Sprites } from "./sprites.js";
 export { Blitter, COST, type Job } from "./blitter.js";
 export { Graphics } from "./gfx.js";
 export { Raster, type BlitOptions, type Rect } from "./raster.js";
-export { Screen, SPRITE_ATTRIBUTE_TABLE, SPRITE_COLOR_TABLE, SPRITE_PATTERN_TABLE } from "./screen.js";
+export { Screen, type SpriteTables } from "./screen.js";
 export { Sprites, SPRITE_COUNT, SPRITE_FLAGS, type SpriteState } from "./sprites.js";
 export { CHAR_HEIGHT, CHAR_WIDTH, FONT } from "./font.js";
 export { SoundDriver } from "./sound.js";
@@ -47,7 +47,7 @@ export function createBios(system: System = createSystem()): Bios {
         system,
         screen,
         gfx: new Graphics(screen, blitter, new Raster(system.vdp, screen)),
-        sprites: new Sprites(system.vdp),
+        sprites: new Sprites(system.vdp, screen),
         blitter,
         bgm: new SoundDriver(system.psg, system.opll)
     };

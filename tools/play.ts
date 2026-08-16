@@ -4,7 +4,7 @@
 
 import { writeFileSync } from "node:fs";
 import { BUTTON, boot } from "../src/index.js";
-import { game } from "../examples/game.js";
+import { game } from "../examples/ink/game.js";
 import { encodePNG } from "./png.js";
 
 const runtime = boot();

@@ -2,29 +2,39 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>INK - Fantasy MSX</title>
-<meta name="description" content="A game running on emulated MSX2 hardware, written in TypeScript instead of Z80.">
+<title>Fantasy MSX</title>
+<meta name="description" content="Examples running on emulated MSX2 hardware, written in TypeScript instead of Z80.">
 <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
     html, body { margin: 0; min-height: 100%; background: #0d0d14; color: #7d7d95; }
     body {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
-        gap: 1rem; padding: 1rem; min-height: 100dvh;
+        gap: .9rem; padding: 1rem; min-height: 100dvh;
         font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
     }
+
+    header { text-align: center; }
+    h1 { margin: 0; font-size: 14px; letter-spacing: .3em; color: #d8d8ea; font-weight: 600; }
+    h1 span { color: #e0703a; }
+    header p { margin: .2rem 0 0; font-size: 12px; }
+
+    nav { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: center; }
+    nav button {
+        border: 1px solid #2c2c46; background: #16162a; color: #9a9ab8;
+        padding: .35rem .9rem; border-radius: 4px; font: inherit; letter-spacing: .1em; cursor: pointer;
+    }
+    nav button:hover { border-color: #46466a; color: #cfcfe4; }
+    nav button[aria-current="true"] { background: #e0703a; border-color: #e0703a; color: #14141c; }
+
     canvas {
         image-rendering: pixelated; background: #000;
-        width: min(100%, 816px); height: auto;
+        width: min(100%, 880px); height: auto;
         border-radius: 3px; box-shadow: 0 0 0 1px #23233a, 0 12px 40px #0006;
     }
-    header { text-align: center; }
-    h1 { margin: 0; font-size: 15px; letter-spacing: .28em; color: #d8d8ea; font-weight: 600; }
-    h1 span { color: #e0703a; }
-    p { margin: .25rem 0 0; }
-    kbd { color: #cfcfe4; }
-    a { color: #6f9fd8; }
-    footer { text-align: center; font-size: 12px; color: #55556b; }
+
+    #summary { margin: 0; max-width: 62ch; text-align: center; }
+    #controls { margin: 0; color: #55556b; font-size: 12px; }
 
     /* Touch controls, only where there is no keyboard to speak of. */
     .pad { display: none; gap: 2rem; align-items: center; user-select: none; touch-action: none; }
@@ -35,22 +45,24 @@
         border-radius: 6px; font: inherit; font-size: 15px; margin: 2px; cursor: pointer;
     }
     .pad button:active { background: #2a2a48; color: #fff; }
-    .fire button { width: 3.6rem; height: 3.6rem; border-radius: 50%; }
     .fire { display: flex; gap: .75rem; }
+    .fire button { width: 3.6rem; height: 3.6rem; border-radius: 50%; }
+
+    footer { text-align: center; font-size: 12px; color: #4a4a5e; }
+    a { color: #6f9fd8; }
 </style>
 
 <header>
-    <h1>I<span>N</span>K</h1>
-    <p>a game on emulated MSX2 hardware, written in TypeScript</p>
+    <h1>FA<span>N</span>TASY MSX</h1>
+    <p>MSX2 hardware, emulated. TypeScript in the Z80's seat.</p>
 </header>
 
-<canvas width="816" height="684"></canvas>
+<nav aria-label="Examples"></nav>
 
-<p>
-    <kbd>arrows</kbd> or <kbd>WASD</kbd> to fly &middot;
-    <kbd>Z</kbd> to spray &middot;
-    <kbd>X</kbd> to start
-</p>
+<canvas width="880" height="684"></canvas>
+
+<p id="summary"></p>
+<p id="controls"></p>
 
 <div class="pad">
     <div class="dpad">

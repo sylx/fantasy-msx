@@ -9,7 +9,7 @@
 // hard limit; the ninth is dropped and flagged in S#0.
 
 import { R1, S, S0, type Vdp } from "../api/index.js";
-import { SPRITE_ATTRIBUTE_TABLE, SPRITE_COLOR_TABLE, SPRITE_PATTERN_TABLE } from "./screen.js";
+import type { Screen } from "./screen.js";
 
 export const SPRITE_COUNT = 32;
 
@@ -43,9 +43,14 @@ export class Sprites {
     private readonly vram: Uint8Array;
     private size: 8 | 16 = 8;
 
-    constructor(private readonly vdp: Vdp) {
+    constructor(private readonly vdp: Vdp, private readonly screen: Screen) {
         this.vram = vdp.vram;
         this.hideAll();
+    }
+
+    /** Table addresses follow the screen mode, since page sizes differ. */
+    private get tables() {
+        return this.screen.spriteTables;
     }
 
     /** 8x8 or 16x16, optionally with every pixel doubled. */
@@ -64,7 +69,7 @@ export class Sprites {
      * is worked out here.
      */
     setPattern(slot: number, rows: ArrayLike<number>): void {
-        const base = SPRITE_PATTERN_TABLE + (slot & 0xff) * 8;
+        const base = this.tables.patterns + (slot & 0xff) * 8;
         if (rows.length <= 8) {
             for (let y = 0; y < 8; ++y) this.vram[base + y] = (rows[y] ?? 0) & 0xff;
             return;
@@ -94,14 +99,14 @@ export class Sprites {
 
     /** Places a sprite. `y` is the screen line its top row appears on. */
     set(index: number, state: SpriteState): void {
-        const attribute = SPRITE_ATTRIBUTE_TABLE + index * 4;
+        const attribute = this.tables.attributes + index * 4;
         // The VDP draws a sprite one line below its stored Y.
         this.vram[attribute] = (state.y - 1) & 0xff;
         this.vram[attribute + 1] = state.x & 0xff;
         this.vram[attribute + 2] = this.size === 16 ? state.pattern & 0xfc : state.pattern & 0xff;
         this.vram[attribute + 3] = 0;
 
-        const colors = SPRITE_COLOR_TABLE + index * 16;
+        const colors = this.tables.colors + index * 16;
         const flags = state.flags ?? 0;
         if (typeof state.color === "number") {
             this.vram.fill((state.color & 0x0f) | flags, colors, colors + 16);
@@ -114,20 +119,20 @@ export class Sprites {
 
     /** Moves a sprite without touching its pattern or colours. */
     move(index: number, x: number, y: number): void {
-        const attribute = SPRITE_ATTRIBUTE_TABLE + index * 4;
+        const attribute = this.tables.attributes + index * 4;
         this.vram[attribute] = (y - 1) & 0xff;
         this.vram[attribute + 1] = x & 0xff;
     }
 
     /** Replaces the per-line colours of a sprite already placed. */
     setLineColors(index: number, colors: ArrayLike<number>, flags = 0): void {
-        const base = SPRITE_COLOR_TABLE + index * 16;
+        const base = this.tables.colors + index * 16;
         for (let line = 0; line < 16; ++line) this.vram[base + line] = ((colors[line] ?? 0) & 0x0f) | flags;
     }
 
     /** Parks one sprite off-screen. The rest keep being drawn. */
     hide(index: number): void {
-        this.vram[SPRITE_ATTRIBUTE_TABLE + index * 4] = OFF_SCREEN;
+        this.vram[this.tables.attributes + index * 4] = OFF_SCREEN;
     }
 
     hideAll(): void {
@@ -139,7 +144,7 @@ export class Sprites {
      * and the only way to tell the chip not to look at the rest at all.
      */
     setActiveCount(count: number): void {
-        if (count < SPRITE_COUNT) this.vram[SPRITE_ATTRIBUTE_TABLE + count * 4] = END_OF_LIST;
+        if (count < SPRITE_COUNT) this.vram[this.tables.attributes + count * 4] = END_OF_LIST;
     }
 
     /**
