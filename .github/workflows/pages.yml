@@ -29,7 +29,12 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # enablement turns Pages on for the repository if it is not already,
+      # which is otherwise a one-off click under Settings that the first run
+      # fails without.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

@@ -306,7 +306,13 @@ works from any subpath. `.github/workflows/pages.yml` builds it on every push to
 WebMSX submodule is not checked out there: its core is vendored into the repo,
 and the submodule only exists so `npm run vendor` can refresh it.
 
-Enable it once under Settings, Pages, Source: GitHub Actions.
+The workflow turns Pages on itself, through `enablement: true` on
+`configure-pages`. Without that the first run fails with `Get Pages site
+failed`, because the repository has no Pages site yet and the action will not
+create one by default.
+
+Pages on a private repository needs a paid plan; on a free one the repository
+has to be public.
 
 ## Credit and licensing
 
