@@ -34,12 +34,12 @@ same position an MSX program's VBlank handler occupies.
 
 | Layer | What it is | Status |
 |-------|-----------|--------|
-| host  | canvas blit, AudioWorklet, frame clock | M0 partial |
+| host  | canvas blit, keyboard, gamepads, 60Hz clock | M5 done |
 | L0 core | VDP, PSG, OPLL (vendored from WebMSX) | M0 done |
 | L1 API | typed register/VRAM/port access | M2 done |
 | L2 BIOS | drawing and sprites | M3 done |
 | L2 BIOS | BGM library | M4 |
-| app | `init` / `update` / `draw` | M5 |
+| app | `init` / `update` / `draw` | M5 done |
 
 ### Drawing takes time, and you can see it
 
@@ -148,6 +148,46 @@ Sprite colours may be given per line, which is a V9938 feature with no
 equivalent on an MSX1: one sprite, shaded, instead of two stacked.
 
 
+## Writing a game
+
+```bash
+npm run dev
+```
+
+```ts
+import { BUTTON, run, type Context } from "./src/index.js";
+
+run({
+    init({ screen, gfx, sprites }: Context) {
+        gfx.now.clear(1);                       // the boot screen cannot wait
+        sprites.setPatternFromBitmap(0, [...]);
+        sprites.setActiveCount(1);
+    },
+
+    update({ input, sprites }: Context) {
+        const { x, y } = input.axis();          // arrows, WASD, or a gamepad
+        sprites.move(0, ship.x += x * 3, ship.y += y * 3);
+    },
+
+    draw({ gfx }: Context) {
+        gfx.fillCircle(120, 100, 30, 8);        // queued: arrives over a few frames
+        gfx.now.text(2, 1, `QUEUE ${gfx.pending}`, 15);
+    }
+}, { canvas: document.querySelector("canvas") });
+```
+
+`draw` does not repaint the screen. It adds to the blitter's queue, which is
+still working through what earlier frames asked for. Nothing drops work, so a
+game that queues faster than the chip draws will fall behind - watch
+`gfx.pending` and hold off, the way the example does.
+
+The runtime steps at a fixed 60Hz whatever the display refreshes at, and will
+run up to three frames to catch up before it gives up on the lost time.
+
+`examples/game.ts` is the whole thing in forty lines: a sprite moving at 60Hz
+for free, blooms the blitter has to grind out, and a readout drawn immediately
+so it never lags behind what it is reporting.
+
 ## Machine profile
 
 Fixed, and not configurable: **MSX2, V9938, NTSC 60Hz, 128KB VRAM**.
@@ -159,7 +199,9 @@ git submodule update --init      # fetch WebMSX
 npm install
 npm run vendor                   # re-copy the WebMSX core (only after a submodule bump)
 npm test
-npx vite-node tools/screenshot.ts out.png
+npm run dev                      # the example, in a browser
+npm run demo -- out.png          # four frames of the blitter working, tiled
+npm run play -- out.png          # the example, headless, with scripted input
 ```
 
 `src/core/vendor/` is generated. Edit `scripts/vendor.sh`, never the files it

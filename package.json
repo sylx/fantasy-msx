@@ -5,10 +5,13 @@
   "type": "module",
   "description": "A fantasy console built on real MSX2 (V9938/AY-3-8910/YM2413) hardware emulation, driven from TypeScript instead of Z80.",
   "scripts": {
-    "vendor": "bash scripts/vendor.sh",
+    "dev": "vite",
+    "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "dev": "vite"
+    "vendor": "bash scripts/vendor.sh",
+    "demo": "vite-node tools/demo.ts",
+    "play": "vite-node tools/play.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
