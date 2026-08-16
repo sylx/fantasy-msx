@@ -202,9 +202,36 @@ Hosts scale by the picture's true width, so both modes fill the same space and
 neither comes out stretched; anything doing its own geometry has to divide by
 it, which is why WIRE projects through `1 / screen.pixelAspect`.
 
+### HAZE
+
+The other end of the machine. SCREEN 3 is the mode nobody used: 64x48 blocks of
+4x4 pixels, sixteen colours, no diagonals. What it has instead is smallness -
+the whole picture is 2048 bytes, so every block of it is recomputed and
+rewritten every frame, which is roughly what a Z80 could have managed too.
+
+Nothing here is queued, and `gfx` never appears: it draws into the bitmap
+modes' nibble-per-pixel framebuffer, and SCREEN 3 has not got one. Its pixels
+live in a pattern generator table, four blocks to the byte, in the order the
+VDP fetches them rather than the order they appear.
+
+Five patterns take turns, and around them are the three things a mode this
+coarse is good at. The palette rotates under the picture, which moves it
+without touching a byte. R23 scrolls the display by scanlines rather than
+blocks, so the field is 64 rows tall, 48 of them on screen, and it slides a
+quarter of a block at a time for free. And the palette flashes on the beat
+without being told where the beat is: a quarter note at tempo 150 is exactly 24
+frames, because the driver resolves tempo to whole frames.
+
+The readout is four hardware sprites, which in this mode is not a layout choice
+- SCREEN 3 gets MSX1 sprites, four to a line and the fifth dropped, so eight
+characters is the whole width of text the chip will show. It has no colours of
+its own either: each frame it asks the palette which entry is currently the
+darkest, lays its bar in that, and writes on it in the brightest.
+
 ```bash
 npm run play -- out.png     # INK, headless, with a scripted controller
 npm run wire -- out.png     # WIRE, four frames of it
+npm run haze -- out.png     # HAZE, one frame of each of its five patterns
 ```
 
 ## Writing a game

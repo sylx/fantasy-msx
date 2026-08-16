@@ -14,7 +14,8 @@
     "play": "vite-node tools/play.ts",
     "sound": "vite-node tools/sound.ts",
     "music": "vite-node tools/music.ts",
-    "wire": "vite-node tools/wire.ts"
+    "wire": "vite-node tools/wire.ts",
+    "haze": "vite-node tools/haze.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

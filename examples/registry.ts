@@ -26,6 +26,13 @@ export const EXAMPLES: readonly Example[] = [
         summary: "A demo. SCREEN 7 at 512x212, an icosahedron redrawn whole every frame, and four FM voices over a PSG bass. X hands the same picture to the V9938's blitter, which manages five a second instead of sixty - drawn on the hidden page either way.",
         controls: "X to switch between software and the blitter",
         load: async () => (await import("./wire/demo.js")).demo
+    },
+    {
+        id: "haze",
+        title: "HAZE",
+        summary: "A demo in SCREEN 3, the mode nobody used: 64x48 blocks of 4x4 pixels. The whole picture is 2048 bytes, so every block of it is recomputed every frame, while the palette rotates underneath and R23 scrolls the lot a quarter of a block at a time. The readout is four sprites, which is all a line of SCREEN 3 will show.",
+        controls: "X for the next pattern - they change on their own every four bars",
+        load: async () => (await import("./haze/demo.js")).demo
     }
 ];
 

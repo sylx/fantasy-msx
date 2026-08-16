@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUTTON, boot } from "../src/index.js";
+import { BUTTON, FONT, boot, glyphOffset } from "../src/index.js";
 import { EXAMPLES, findExample } from "../examples/registry.js";
 
 describe("the example registry", () => {
@@ -146,5 +146,126 @@ describe("WIRE's two drawing paths", () => {
         press();
         expect(runtime.gfx.pending).toBe(0);
         expect(runtime.screen.drawPage).not.toBe(runtime.screen.displayPage);
+    });
+});
+
+describe("the HAZE demo", () => {
+    const PATTERN_TABLE = 0x0000;
+    const PATTERN_BYTES = 2048;
+    const SPRITE_ATTRIBUTES = 0x1c00;
+    const SPRITE_PATTERNS = 0x2000;
+    /** Screen line the readout is meant to stay on, whatever the scroll does. */
+    const STATUS_TOP = 176;
+
+    async function started(frames = 30) {
+        const { demo } = await import("../examples/haze/demo.js");
+        const runtime = boot();
+        runtime.run(demo);
+        runtime.step(frames);
+        return runtime;
+    }
+
+    /**
+     * Reads the eight-character readout back out of the sprite patterns, by
+     * matching each character against the font it was drawn from. The demo
+     * packs two characters into every 16x16 sprite, six pixels apart.
+     */
+    function readout(vram: Uint8Array): string {
+        const rows = (pattern: number, right: boolean): number[] => {
+            const out: number[] = [];
+            for (let k = 0; k < 8; ++k) {
+                const bits = (vram[pattern + 4 + k] << 8) | vram[pattern + 16 + 4 + k];
+                out.push((right ? bits >> 2 : bits >> 8) & 0xf8);
+            }
+            return out;
+        };
+
+        let text = "";
+        for (let sprite = 0; sprite < 4; ++sprite) {
+            for (const right of [false, true]) {
+                const glyph = rows(SPRITE_PATTERNS + sprite * 32, right);
+                let found = " ";
+                for (let code = 32; code < 127; ++code) {
+                    const offset = glyphOffset(code);
+                    if (glyph.every((bits, k) => bits === (FONT[offset + k] & 0xf8))) {
+                        found = String.fromCharCode(code);
+                        break;
+                    }
+                }
+                text += found;
+            }
+        }
+        return text;
+    }
+
+    it("runs in SCREEN 3, with both chips going", async () => {
+        const runtime = await started();
+
+        expect(runtime.screen.mode.name).toBe("MC");
+        expect(runtime.screen.mode.screen).toBe(3);
+        expect(runtime.screen.width).toBe(256);
+        expect(runtime.screen.height).toBe(192);
+        expect(runtime.bgm.playing).toBe(true);
+        expect(runtime.bios.system.machine.getAudioSignals()).toHaveLength(2);
+    });
+
+    it("rewrites the whole picture every frame and queues nothing", async () => {
+        const runtime = await started();
+        const vram = runtime.bios.system.vdp.vram;
+
+        const before = vram.slice(PATTERN_TABLE, PATTERN_TABLE + PATTERN_BYTES);
+        runtime.step(1);
+        const after = vram.slice(PATTERN_TABLE, PATTERN_TABLE + PATTERN_BYTES);
+
+        expect(after).not.toEqual(before);
+        // Every byte is rewritten, and a good third of them land on a different
+        // colour from the frame before: a moving picture, not a corner touched up.
+        let changed = 0;
+        for (let i = 0; i < PATTERN_BYTES; ++i) if (before[i] !== after[i]) ++changed;
+        expect(changed).toBeGreaterThan(PATTERN_BYTES / 4);
+
+        // Nothing is handed to the blitter, which could not reach this mode anyway.
+        expect(runtime.gfx.pending).toBe(0);
+    });
+
+    it("shows the pattern's name in four sprites, and stops the VDP after them", async () => {
+        const runtime = await started();
+        const vram = runtime.bios.system.vdp.vram;
+
+        expect(readout(vram).trimEnd()).toMatch(/^PLASMA/);
+        // The fifth attribute ends the list, so a line never carries more than
+        // the four sprites this mode will draw.
+        expect(vram[SPRITE_ATTRIBUTES + 16]).toBe(208);
+    });
+
+    it("moves on by itself every four bars, and on X without waiting", async () => {
+        const runtime = await started(4 * 4 * 24 + 50);
+        const vram = runtime.bios.system.vdp.vram;
+        expect(readout(vram).trimEnd()).toMatch(/^VORTEX/);
+
+        runtime.input.setButton(BUTTON.B, true);
+        runtime.step(1);
+        runtime.input.setButton(BUTTON.B, false);
+        runtime.step(50);
+        expect(readout(vram).trimEnd()).toMatch(/^MOIRE/);
+    });
+
+    it("scrolls the display without letting the readout scroll with it", async () => {
+        const runtime = await started(10);
+        const { vdp } = runtime.bios.system;
+
+        const scrolls = new Set<number>();
+        for (let i = 0; i < 60; ++i) {
+            runtime.step(1);
+            scrolls.add(vdp.read(23));
+            // R23 offsets sprites too, so the demo adds it back. The line the
+            // readout actually lands on is its stored Y plus one, less R23 -
+            // give or take the single line it steps to avoid a Y of 208, which
+            // would tell the VDP there were no sprites at all.
+            const line = (vdp.vram[SPRITE_ATTRIBUTES] + 1 - vdp.read(23)) & 0xff;
+            expect(line).toBeGreaterThanOrEqual(STATUS_TOP);
+            expect(line).toBeLessThanOrEqual(STATUS_TOP + 1);
+        }
+        expect(scrolls.size).toBeGreaterThan(20);
     });
 });

@@ -13,7 +13,7 @@ export { Graphics } from "./gfx.js";
 export { Raster, type BlitOptions, type Rect } from "./raster.js";
 export { Screen, type SpriteTables } from "./screen.js";
 export { Sprites, SPRITE_COUNT, SPRITE_FLAGS, type SpriteState } from "./sprites.js";
-export { CHAR_HEIGHT, CHAR_WIDTH, FONT } from "./font.js";
+export { CHAR_HEIGHT, CHAR_WIDTH, FONT, glyphOffset } from "./font.js";
 export { SoundDriver } from "./sound.js";
 export {
     compile, compileTrack, semitoneToHz, MMLError,
