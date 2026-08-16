@@ -185,10 +185,15 @@ A demo, showing the machine at its widest. SCREEN 7 is 512x212 in 16 colours out
 of 512, with two 64KB pages to flip between. An icosahedron, a ground plane and
 thirty edges are redrawn whole every frame, on the page that is not being shown.
 
-Nothing here is a sprite and nothing goes through the blitter. Line art at 512
-across is more pixels than the chip could push in a frame, and with TypeScript
-in the CPU's seat, drawing it in software is free. Four FM voices hold the
-chords over a PSG bass.
+Nothing here is a sprite. **X** hands the same picture to the V9938's blitter
+instead of drawing it in software, which is the comparison worth having: a
+whole SCREEN 7 page cleared and thirty 512-pixel edges pulled across it takes
+the chip about twelve frames, so sixty pictures a second becomes five.
+
+In software it draws on the hidden page and swaps, so nothing is ever seen
+half-built. Through the blitter it draws on the page you are looking at,
+because watching the clear sweep down and the wireframe come back is the point.
+Four FM voices hold the chords over a PSG bass.
 
 Its pixels are not square. The V9938 paints the same picture width whatever the
 mode, so SCREEN 6 and 7 get their 512 columns by halving the pixel rather than

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boot } from "../src/index.js";
+import { BUTTON, boot } from "../src/index.js";
 import { EXAMPLES, findExample } from "../examples/registry.js";
 
 describe("the example registry", () => {
@@ -73,5 +73,72 @@ describe("the WIRE demo", () => {
         };
         expect(painted(0x00000)).toBeGreaterThan(1000);
         expect(painted(0x10000)).toBeGreaterThan(1000);
+    });
+});
+
+describe("WIRE's two drawing paths", () => {
+    async function started() {
+        const { demo } = await import("../examples/wire/demo.js");
+        const runtime = boot();
+        runtime.run(demo);
+        runtime.step(20);
+        return runtime;
+    }
+
+    /** Frames between one finished picture and the next. */
+    function timeOneImage(runtime: Awaited<ReturnType<typeof started>>): number {
+        while (!runtime.gfx.busy) runtime.step();
+        const start = runtime.frame;
+        while (runtime.gfx.busy) runtime.step();
+        return runtime.frame - start;
+    }
+
+    it("draws in software with nothing queued at all", async () => {
+        const runtime = await started();
+        expect(runtime.gfx.pending).toBe(0);
+        runtime.step(5);
+        expect(runtime.gfx.pending).toBe(0);
+    });
+
+    it("hands the same picture to the blitter when X is pressed", async () => {
+        const runtime = await started();
+        runtime.input.setButton(BUTTON.B, true);
+        runtime.step(1);
+        runtime.input.setButton(BUTTON.B, false);
+        runtime.step(1);
+
+        expect(runtime.gfx.pending).toBeGreaterThan(0);
+        // A dozen frames a picture, against software's one - which is the
+        // difference the demo exists to show.
+        expect(timeOneImage(runtime)).toBeGreaterThan(6);
+    });
+
+    it("paints the page it is showing, so the redraw can be watched", async () => {
+        const runtime = await started();
+        expect(runtime.screen.drawPage).not.toBe(runtime.screen.displayPage);
+
+        runtime.input.setButton(BUTTON.B, true);
+        runtime.step(1);
+        runtime.input.setButton(BUTTON.B, false);
+        expect(runtime.screen.drawPage).toBe(runtime.screen.displayPage);
+    });
+
+    it("goes back to software, and back to swapping pages", async () => {
+        const runtime = await started();
+        const press = () => {
+            runtime.input.setButton(BUTTON.B, true);
+            runtime.step(1);
+            runtime.input.setButton(BUTTON.B, false);
+            runtime.step(1);
+        };
+
+        press();
+        expect(runtime.gfx.pending).toBeGreaterThan(0);
+
+        // Pressing again abandons the half-drawn picture and goes back to
+        // software, which queues nothing and swaps pages every frame.
+        press();
+        expect(runtime.gfx.pending).toBe(0);
+        expect(runtime.screen.drawPage).not.toBe(runtime.screen.displayPage);
     });
 });

@@ -8,8 +8,14 @@
 // blitter is for when you want its pace; this is when you do not.
 //
 // Everything moving here is drawn every frame. Nothing is a sprite.
+//
+// X switches between the two ways of drawing it. In software the picture is
+// rebuilt every frame for nothing. Through the blitter it is rebuilt at the
+// speed the V9938 can actually clear a page and pull 512-pixel lines across
+// it, which is the same picture at a fraction of the rate - and the point of
+// having the choice.
 
-import { compile, opllVoice, psgVoice, rhythmVoice, type App, type Context } from "../../src/index.js";
+import { BUTTON, compile, opllVoice, psgVoice, rhythmVoice, type App, type Context } from "../../src/index.js";
 
 const WIDTH = 512;
 const HEIGHT = 212;
@@ -98,18 +104,41 @@ const SCORE = compile([
 
 // --- State -------------------------------------------------------------------
 
-const state = { time: 0 };
+/**
+ * The subset of drawing both paths share. `gfx` queues for the blitter and
+ * `gfx.now` writes VRAM directly, but the scene is written once against this
+ * and handed whichever one is in charge.
+ */
+interface Painter {
+    clear(color: number): void;
+    hline(x: number, y: number, width: number, color: number): void;
+    line(x0: number, y0: number, x1: number, y1: number, color: number): void;
+    fillRect(x: number, y: number, width: number, height: number, color: number): void;
+    text(x: number, y: number, text: string, color?: number, background?: number): void;
+}
+
+const state = {
+    time: 0,
+    /** False draws in software every frame; true hands the scene to the blitter. */
+    blitter: false,
+    /** Frame the image in progress was started on, for measuring the rate. */
+    startedAt: 0,
+    /** True once a whole image has been timed, so the first one claims nothing. */
+    timed: false,
+    /** How many frames the last completed image took. */
+    cost: 1
+};
 
 // --- Drawing -----------------------------------------------------------------
 
 const HORIZON = 118;
 
 /** A ground plane running to a vanishing point, sliding towards the eye. */
-function floor(gfx: Context["gfx"], time: number): void {
+function floor(paint: Painter, time: number): void {
     // Lines away, converging on the vanishing point. Drawn first, so the
     // crossing lines sit on top of them.
     for (let i = -12; i <= 12; ++i) {
-        gfx.now.line(CENTRE_X, HORIZON, CENTRE_X + i * 96, HEIGHT - 1, DEPTH_LOW + 1);
+        paint.line(CENTRE_X, HORIZON, CENTRE_X + i * 96, HEIGHT - 1, DEPTH_LOW + 1);
     }
 
     // Lines across, spaced by 1/z so they crowd towards the horizon, and
@@ -119,11 +148,11 @@ function floor(gfx: Context["gfx"], time: number): void {
         const z = i + offset + 2.4;
         const y = Math.round(HORIZON + 208 / z);
         if (y >= HEIGHT || y <= HORIZON + 1) continue;
-        gfx.now.hline(0, y, WIDTH, depthColor(Math.min(1, 2.4 / z)));
+        paint.hline(0, y, WIDTH, depthColor(Math.min(1, 2.4 / z)));
     }
 }
 
-function solid(gfx: Context["gfx"], time: number, stretch: number): void {
+function solid(paint: Painter, time: number, stretch: number): void {
     const yaw = time * 0.7;
     const pitch = Math.sin(time * 0.41) * 0.8;
     const scale = 0.62 + 0.11 * Math.sin(time * 0.9);
@@ -137,7 +166,7 @@ function solid(gfx: Context["gfx"], time: number, stretch: number): void {
 
     for (const { index, depth } of order) {
         const [a, b] = EDGES[index];
-        gfx.now.line(
+        paint.line(
             Math.round(points[a].x), Math.round(points[a].y),
             Math.round(points[b].x), Math.round(points[b].y),
             depthColor(depth)
@@ -145,9 +174,31 @@ function solid(gfx: Context["gfx"], time: number, stretch: number): void {
     }
 }
 
+/** One whole picture, drawn by whichever painter is in charge. */
+function scene(paint: Painter, time: number, stretch: number): void {
+    paint.clear(1);
+    floor(paint, time * 1.6);
+    solid(paint, time, stretch);
+
+    const rate = state.timed ? `${(60 / state.cost).toFixed(1)} IMAGES/SEC` : "TIMING";
+    paint.text(8, 6, "W I R E", 15);
+    paint.text(8, 18, "SCREEN 7 - 512x212 - 16 OF 512 COLOURS", 9);
+    paint.text(8, 28, state.blitter
+        ? `VDP BLITTER - ${rate} - X FOR SOFTWARE`
+        : "SOFTWARE - 60 IMAGES/SEC - X FOR THE BLITTER", state.blitter ? 11 : 7);
+
+    // The grid runs down to the bottom edge, so the caption gets its own strip.
+    paint.fillRect(0, HEIGHT - 16, WIDTH, 16, 1);
+    paint.text(8, HEIGHT - 12, "FM: FOUR VOICES + PSG BASS + RHYTHM", 6);
+}
+
 export const demo: App = {
     init({ screen, gfx, sprites, bgm }: Context) {
         state.time = 0;
+        state.blitter = false;
+        state.startedAt = 0;
+        state.timed = false;
+        state.cost = 1;
 
         screen.setMode("G6");           // SCREEN 7: 512x212, 16 of 512 colours
         screen.setBackdrop(1);
@@ -170,20 +221,39 @@ export const demo: App = {
         state.time += 1 / 60;
     },
 
-    draw({ gfx, screen }: Context) {
-        // Redrawn whole, every frame, on the page that is not being shown.
-        gfx.now.clear(1);
-        floor(gfx, state.time * 1.6);
-        solid(gfx, state.time, 1 / screen.pixelAspect);
+    draw({ gfx, screen, input, frame }: Context) {
+        if (input.btnp(BUTTON.B)) {
+            state.blitter = !state.blitter;
+            gfx.abandon();              // drop whatever the old path left queued
+            state.timed = false;
+            state.startedAt = frame;
 
-        gfx.now.text(8, 6, "W I R E", 15);
-        gfx.now.text(8, 18, "SCREEN 7 - 512x212 - 16 OF 512 COLOURS", 9);
-        gfx.now.text(8, 28, `${EDGES.length} EDGES, SOFTWARE, 60 FPS, TWO PAGES`, 7);
-        // The grid runs down to the bottom edge, so the caption gets its own
-        // strip to sit on.
-        gfx.now.fillRect(0, HEIGHT - 16, WIDTH, 16, 1);
-        gfx.now.text(8, HEIGHT - 12, "FM: FOUR VOICES + PSG BASS + RHYTHM", 6);
+            // Software draws on the hidden page and swaps, so nothing is ever
+            // seen half-built. The blitter draws on the page you are looking
+            // at, because watching it clear and redraw is the whole point.
+            screen.setDrawPage(state.blitter
+                ? screen.displayPage
+                : (screen.displayPage + 1) % screen.mode.pages);
+        }
 
-        screen.flip();
+        const stretch = 1 / screen.pixelAspect;
+
+        if (!state.blitter) {
+            // Rebuilt whole, every frame, on the page that is not being shown.
+            scene(gfx.now, state.time, stretch);
+            screen.flip();
+            state.cost = 1;
+            return;
+        }
+
+        // Nothing to do until the chip has finished the picture it is on.
+        if (gfx.busy) return;
+
+        if (state.timed) state.cost = Math.max(1, frame - state.startedAt);
+        state.startedAt = frame;
+        scene(gfx, state.time, stretch);
+        // Marked only now, so the first picture reads TIMING rather than
+        // claiming the one frame it has not yet taken.
+        state.timed = true;
     }
 };

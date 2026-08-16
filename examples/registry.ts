@@ -23,8 +23,8 @@ export const EXAMPLES: readonly Example[] = [
     {
         id: "wire",
         title: "WIRE",
-        summary: "A demo. SCREEN 7 at 512x212, an icosahedron redrawn in software every frame across two pages, and four FM voices over a PSG bass.",
-        controls: "nothing to press · sit back",
+        summary: "A demo. SCREEN 7 at 512x212, an icosahedron redrawn whole every frame, and four FM voices over a PSG bass. X hands the same picture to the V9938's blitter, which manages five a second instead of sixty.",
+        controls: "X to switch between software and the blitter",
         load: async () => (await import("./wire/demo.js")).demo
     }
 ];
