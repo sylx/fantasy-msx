@@ -3,9 +3,10 @@
 // The framebuffer is persistent, so the paint you lay down *is* the game state.
 // The blitter is slow, so paint arrives over several frames and you have to lay
 // it where a drifter is going rather than where it is. Sprites cost nothing, so
-// everything that moves is one.
+// everything that moves is one - including the shots, which are thrown in the
+// direction you are flying and burst into paint where they land.
 //
-// Arrows or WASD to fly, Z to spray, X to start.
+// Arrows or WASD to fly, Z to shoot, X to start.
 
 import {
     BUTTON, compile, opllVoice, psgVoice, rhythmVoice, type App, type Context
@@ -19,10 +20,26 @@ const BAR = 10;                     // status bar along the top
 const PLAYER_SPRITE = 0;
 const PLAYER_PATTERN = 0;
 const DRIFTER_PATTERN = 4;          // 16x16 patterns come in fours
-const MAX_DRIFTERS = 7;             // eight sprites to a scanline, and one is the player
+const BULLET_PATTERN = 8;
+const MAX_DRIFTERS = 6;             // eight sprites to a scanline, and the player and a shot want two
+const MAX_BULLETS = 3;
 
 /** Palette entries at or above this count as painted. */
 const INK = 8;
+
+/**
+ * The ink, coolest first. A splat lays these outside in, so what arrives is a
+ * ring of dark red closing on a pale yellow core - a gradient made of the four
+ * bits a pixel has, which is the only way this machine has of making one.
+ */
+const INK_RAMP = [8, 9, 10, 11, 12];
+
+/** The pale blue everything that is not ink is drawn in. */
+const COOL = 13;
+
+const BULLET_SPEED = 4;
+const BULLET_RANGE = 92;            // pixels a shot carries before it bursts on its own
+const SPLAT_RADIUS = 26;
 
 const PLAYER_ART = [
     ".......##.......", "......####......", "......####......", ".....######.....",
@@ -37,6 +54,16 @@ const DRIFTER_ART = [
     "##..##......##..", "##..##########..", "##.....##.....##", "###....##....###",
     ".####..##..####.", "..############..", "...##########...", "................"
 ];
+
+const BULLET_ART = [
+    "................", "................", "................", "................",
+    "................", ".....######.....", "....########....", "....########....",
+    "....########....", "....########....", ".....######.....", "................",
+    "................", "................", "................", "................"
+];
+
+/** One colour per line, matching the rows BULLET_ART actually sets. */
+const BULLET_SHADING = [0, 0, 0, 0, 0, 12, 12, 11, 11, 10, 9, 0, 0, 0, 0, 0];
 
 // --- Music -------------------------------------------------------------------
 
@@ -57,7 +84,8 @@ const KNELL = compile([
     { voice: opllVoice(0), mml: "t100 @6 v12 l2 o3 c" }
 ]);
 
-const SPRAY = "t150 v14 q8 l32 o6 >c< bagfedc";
+const SHOT = "t150 v14 q8 l32 o6 >c< bagfedc";
+const BURST = "t150 v14 q8 l32 o4 c e g >c w6 v9 g e c";
 const POP = "t150 v15 q8 l32 o5 [c>e<]2 w12 v10 c8";
 
 // --- State -------------------------------------------------------------------
@@ -72,16 +100,29 @@ interface Drifter {
     alive: boolean;
 }
 
+/** A shot in flight. `x` and `y` are its centre; `life` is frames left to run. */
+interface Bullet {
+    x: number;
+    y: number;
+    dx: number;
+    dy: number;
+    life: number;
+}
+
 const state = {
     phase: "title" as Phase,
     x: 120,
     y: 150,
+    /** Where the ship last moved, which is where the next shot goes. */
+    aimX: 0,
+    aimY: -1,
     lives: 3,
     score: 0,
     wave: 1,
     cooldown: 0,
     timer: 0,
-    drifters: [] as Drifter[]
+    drifters: [] as Drifter[],
+    bullets: [] as Bullet[]
 };
 
 /** Seeded, so a run can be reproduced by a screenshot tool or a bug report. */
@@ -119,19 +160,32 @@ function paintField(gfx: Context["gfx"]): void {
     }
 }
 
+/**
+ * Ink, laid down as a gradient. The ramp goes on outside in - each disc smaller
+ * and hotter than the one under it - so the blitter delivers a splat that closes
+ * on its core rather than a flat blob. It costs a little over twice a plain
+ * circle, which is exactly the sort of thing the ink meter is measuring.
+ */
+function splat(gfx: Context["gfx"], cx: number, cy: number, radius: number): void {
+    for (let step = 0; step < INK_RAMP.length; ++step) {
+        const r = Math.round(radius * (1 - step / INK_RAMP.length));
+        if (r > 0) gfx.fillCircle(cx, cy, r, INK_RAMP[step]);
+    }
+}
+
 function statusBar(gfx: Context["gfx"]): void {
     gfx.now.fillRect(0, 0, WIDTH, BAR, 1);
     gfx.now.text(2, 1, `${String(state.score).padStart(6, "0")}`, 15);
-    gfx.now.text(56, 1, `W${state.wave}`, 11);
+    gfx.now.text(56, 1, `W${state.wave}`, COOL);
 
     for (let i = 0; i < state.lives; ++i) gfx.now.fillRect(80 + i * 8, 3, 5, 5, 9);
 
-    // What the blitter still owes, which is also how long until you can spray.
+    // What the blitter still owes, which is also how long until you can shoot.
     const owed = Math.min(1, gfx.work / 30000);
-    gfx.now.text(150, 1, "INK", owed > 0.7 ? 8 : 6);
+    gfx.now.text(150, 1, "INK", owed > 0.7 ? 9 : 6);
     gfx.now.rect(172, 2, 82, 6, 6);
     const filled = Math.round((1 - owed) * 80);
-    if (filled > 0) gfx.now.fillRect(173, 3, filled, 4, owed > 0.7 ? 8 : 10);
+    if (filled > 0) gfx.now.fillRect(173, 3, filled, 4, owed > 0.7 ? 9 : 12);
 }
 
 function centred(gfx: Context["gfx"], y: number, text: string, color: number): void {
@@ -149,7 +203,10 @@ function startGame(ctx: Context): void {
     state.x = 120;
     state.y = 150;
     state.cooldown = 0;
+    state.aimX = 0;
+    state.aimY = -1;
     state.drifters = spawnWave(1);
+    state.bullets = [];
 
     ctx.gfx.abandon();
     paintField(ctx.gfx);
@@ -161,9 +218,52 @@ function loseLife(ctx: Context): void {
     state.phase = state.lives > 0 ? "dying" : "over";
     state.timer = 60;
     ctx.bgm.play(state.lives > 0 ? FANFARE : KNELL);
+    state.bullets = [];
     ctx.gfx.abandon();
     // A splash where the ship was, so the loss leaves a mark on the field.
-    ctx.gfx.fillCircle(state.x + 8, state.y + 8, 30, 8);
+    splat(ctx.gfx, state.x + 8, state.y + 8, 30);
+}
+
+/** Sends a shot off in the direction the ship is flying. */
+function fire(ctx: Context): void {
+    // A diagonal would otherwise carry a shot half again as far per frame.
+    const length = Math.hypot(state.aimX, state.aimY) || 1;
+    const dx = (state.aimX / length) * BULLET_SPEED;
+    const dy = (state.aimY / length) * BULLET_SPEED;
+
+    state.bullets.push({
+        // Started clear of the nose, so a shot is never lost inside the ship.
+        x: state.x + 8 + dx * 2,
+        y: state.y + 8 + dy * 2,
+        dx,
+        dy,
+        life: Math.round(BULLET_RANGE / BULLET_SPEED)
+    });
+    ctx.bgm.effect(psgVoice(2), SHOT);
+    state.cooldown = 10;
+}
+
+/** Bursts a shot where it stopped, and hands the field its paint. */
+function land(ctx: Context, bullet: Bullet): void {
+    const x = Math.max(2, Math.min(WIDTH - 3, Math.round(bullet.x)));
+    const y = Math.max(BAR + 2, Math.min(HEIGHT - 3, Math.round(bullet.y)));
+    splat(ctx.gfx, x, y, SPLAT_RADIUS);
+    ctx.bgm.effect(psgVoice(2), BURST);
+}
+
+/** Flies the shots, bursting any that run out of range or reach the edge. */
+function updateBullets(ctx: Context): void {
+    for (let i = state.bullets.length - 1; i >= 0; --i) {
+        const bullet = state.bullets[i];
+        bullet.x += bullet.dx;
+        bullet.y += bullet.dy;
+
+        const offField = bullet.x < 3 || bullet.x > WIDTH - 4 || bullet.y < BAR + 3 || bullet.y > HEIGHT - 4;
+        if (--bullet.life > 0 && !offField) continue;
+
+        state.bullets.splice(i, 1);
+        land(ctx, bullet);
+    }
 }
 
 function updatePlaying(ctx: Context): void {
@@ -173,15 +273,19 @@ function updatePlaying(ctx: Context): void {
     state.x = Math.max(0, Math.min(WIDTH - 16, state.x + dx * 3));
     state.y = Math.max(BAR, Math.min(HEIGHT - 16, state.y + dy * 3));
 
+    // Standing still keeps the last heading, so letting go of the stick to line
+    // a shot up does not leave it with nowhere to go.
+    if (dx !== 0 || dy !== 0) { state.aimX = dx; state.aimY = dy; }
+
     if (state.cooldown > 0) --state.cooldown;
 
     // The queue never drops work, so the game has to hold off itself. That
     // waiting is the reload.
-    if (input.btn(BUTTON.A) && state.cooldown === 0 && gfx.work < 24000) {
-        gfx.fillCircle(state.x + 8, state.y + 8, 26, INK + ((random() * 3) | 0));
-        bgm.effect(psgVoice(2), SPRAY);
-        state.cooldown = 10;
+    if (input.btn(BUTTON.A) && state.cooldown === 0 && state.bullets.length < MAX_BULLETS && gfx.work < 24000) {
+        fire(ctx);
     }
+
+    updateBullets(ctx);
 
     for (const drifter of state.drifters) {
         if (!drifter.alive) continue;
@@ -226,27 +330,37 @@ export const game: App = {
         random = makeRandom(0x5a17);
         state.phase = "title";
         state.drifters = [];
+        state.bullets = [];
+        state.aimX = 0;
+        state.aimY = -1;
         state.score = 0;
         state.wave = 1;
         state.lives = 3;
         bgm.stop();
 
         screen.setBackdrop(1);
-        // Night below, ink above: 1-7 go dark blue to pale, 8-11 warm.
+        // Night below, ink above: 1-7 go dark blue to pale, 8-12 are the ink
+        // ramp from a dark red edge to a pale yellow core, and 13 is the pale
+        // blue the HUD and the drifters are drawn in.
         for (let i = 1; i < 8; ++i) screen.setColor(i, (i - 1) >> 1, (i - 1) >> 2, i);
-        screen.setColor(8, 7, 1, 2);
-        screen.setColor(9, 7, 4, 1);
-        screen.setColor(10, 7, 6, 2);
-        screen.setColor(11, 4, 6, 7);
+        screen.setColor(8, 4, 0, 1);
+        screen.setColor(9, 6, 1, 0);
+        screen.setColor(10, 7, 3, 0);
+        screen.setColor(11, 7, 5, 1);
+        screen.setColor(12, 7, 7, 4);
+        screen.setColor(COOL, 4, 6, 7);
 
         paintField(gfx);
 
         sprites.setSize(16);
         sprites.setPatternFromBitmap(PLAYER_PATTERN, PLAYER_ART);
         sprites.setPatternFromBitmap(DRIFTER_PATTERN, DRIFTER_ART);
+        sprites.setPatternFromBitmap(BULLET_PATTERN, BULLET_ART);
         sprites.set(PLAYER_SPRITE, {
             x: state.x, y: state.y, pattern: PLAYER_PATTERN,
-            color: [15, 15, 14, 14, 9, 9, 9, 8, 8, 8, 8, 6, 6, 4, 4, 4]
+            // Cool all the way down, now that the warm end of the palette is
+            // ink: the ship has to stay legible on top of its own splats.
+            color: [15, 15, 15, 14, 14, 14, COOL, COOL, COOL, 7, 7, 7, 6, 6, 5, 4]
         });
         sprites.setActiveCount(1);
     },
@@ -288,7 +402,16 @@ export const game: App = {
             if (!drifter.alive || slot > MAX_DRIFTERS) continue;
             sprites.set(slot, {
                 x: Math.round(drifter.x), y: Math.round(drifter.y), pattern: DRIFTER_PATTERN,
-                color: [11, 11, 11, 7, 7, 7, 5, 5, 5, 5, 7, 7, 7, 11, 11, 11]
+                color: [COOL, COOL, COOL, 7, 7, 7, 5, 5, 5, 5, 7, 7, 7, COOL, COOL, COOL]
+            });
+            ++slot;
+        }
+        // Shots last, and shaded down the ink ramp so a shot in flight reads as
+        // the paint it is about to become.
+        for (const bullet of state.bullets) {
+            sprites.set(slot, {
+                x: Math.round(bullet.x) - 8, y: Math.round(bullet.y) - 8, pattern: BULLET_PATTERN,
+                color: BULLET_SHADING
             });
             ++slot;
         }
@@ -303,14 +426,14 @@ export const game: App = {
             gfx.now.fillRect(40, 70, 176, 62, 1);
             gfx.now.rect(40, 70, 176, 62, 6);
             centred(gfx, 80, "I N K", 10);
-            centred(gfx, 98, "PAINT WHERE THEY ARE GOING", 11);
+            centred(gfx, 98, "SHOOT WHERE THEY ARE GOING", COOL);
             centred(gfx, 112, "PRESS X TO START", ctx.frame % 40 < 26 ? 15 : 6);
         }
 
         if (state.phase === "over") {
             gfx.now.fillRect(56, 84, 144, 44, 1);
-            gfx.now.rect(56, 84, 144, 44, 8);
-            centred(gfx, 92, "GAME OVER", 8);
+            gfx.now.rect(56, 84, 144, 44, 10);
+            centred(gfx, 92, "GAME OVER", 10);
             centred(gfx, 108, `SCORE ${state.score}`, 15);
         }
     }

@@ -175,17 +175,48 @@ describe("the example game", () => {
         expect(spriteX(runtime)).toBeLessThan(before);
     });
 
-    it("lays paint, and holds off when the queue gets deep", () => {
+    it("paints where a shot lands, not under the ship", () => {
         const runtime = start();
         while (runtime.gfx.busy) runtime.step();
-        expect(runtime.gfx.getPixel(spriteX(runtime) + 8, 158)).toBeLessThan(8);
 
-        // Holding the trigger down: the game keeps spraying, but refuses while
+        // The ship starts still, so it is aimed up the screen: a shot leaves
+        // the nose at y=150 and carries 92 pixels before it bursts.
+        runtime.input.setButton(BUTTON.A, true);
+        runtime.step(2);
+        runtime.input.setButton(BUTTON.A, false);
+        runtime.step(30);
+        while (runtime.gfx.busy) runtime.step();
+
+        const x = spriteX(runtime) + 8;
+        expect(runtime.gfx.getPixel(x, 158)).toBeLessThan(8);          // nothing under the ship
+        expect(runtime.gfx.getPixel(x, 58)).toBeGreaterThanOrEqual(8); // ink where it landed
+    });
+
+    it("lays that paint as a gradient, hottest at the core", () => {
+        const runtime = start();
+        runtime.input.setButton(BUTTON.A, true);
+        runtime.step(2);
+        runtime.input.setButton(BUTTON.A, false);
+        runtime.step(30);
+        while (runtime.gfx.busy) runtime.step();
+
+        // Out from the middle of the splat, the ramp only ever cools.
+        const x = spriteX(runtime) + 8;
+        const ramp = [0, 8, 16, 22].map((offset) => runtime.gfx.getPixel(x + offset, 58));
+        expect(ramp[0]).toBe(12);
+        for (let i = 1; i < ramp.length; ++i) expect(ramp[i]).toBeLessThan(ramp[i - 1]);
+        expect(ramp[ramp.length - 1]).toBeGreaterThanOrEqual(8);
+    });
+
+    it("holds off when the queue gets deep", () => {
+        const runtime = start();
+        while (runtime.gfx.busy) runtime.step();
+
+        // Holding the trigger down: the game keeps shooting, but refuses while
         // the blitter is behind, so the queue never runs away.
         runtime.input.setButton(BUTTON.A, true);
-        runtime.step(90);
+        runtime.step(180);
 
-        expect(runtime.gfx.getPixel(spriteX(runtime) + 8, 158)).toBeGreaterThanOrEqual(8);
         expect(runtime.gfx.work).toBeLessThan(40000);
     });
 
@@ -196,7 +227,7 @@ describe("the example game", () => {
 
     it("gets somewhere when played", () => {
         const runtime = start();
-        // Fly right, spraying, for a few seconds and expect to have hit something.
+        // Fly right, shooting, for a few seconds and expect to have hit something.
         runtime.input.setButton(BUTTON.A, true);
         runtime.input.setButton(BUTTON.RIGHT, true);
         runtime.step(240);

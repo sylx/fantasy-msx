@@ -170,14 +170,20 @@ screen is in the URL fragment. `examples/registry.ts` is the list.
 A game, because the machine's oddities only make sense once something is built
 out of them.
 
-You fly a ship and spray paint. Painted ground kills the drifters, but paint
-arrives over several frames, so you lay it where a drifter is *going*. The
-drifters scrub the ground they cross. The framebuffer is not a picture of the
-game - it *is* the game state, read back with `gfx.getPixel`. The ink gauge in
-the status bar is `gfx.work`: the blitter's backlog, doubling as your reload.
+You fly a ship and throw paint. A shot leaves in the direction you are flying,
+carries about ninety pixels, and bursts where it lands into a splat laid down as
+a gradient - five discs of the ink ramp, outside in, from a dark red edge to a
+pale yellow core. Painted ground kills the drifters, but a splat arrives over
+several frames, so you shoot at where a drifter is *going* and it has to be in
+flight before that. The drifters scrub the ground they cross. The framebuffer is
+not a picture of the game - it *is* the game state, read back with
+`gfx.getPixel`. The ink gauge in the status bar is `gfx.work`: the blitter's
+backlog, doubling as your reload, and a gradient splat costs it a little over
+twice a flat one.
 
-Every actor is a hardware sprite, so none of them cost anything. The music is
-MML on the PSG and OPLL, and firing borrows a PSG channel for the spray.
+Every actor is a hardware sprite, shots included, so none of them cost anything.
+The music is MML on the PSG and OPLL, and firing borrows a PSG channel for the
+shot and its burst.
 
 ### WIRE
 

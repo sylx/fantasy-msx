@@ -16,8 +16,8 @@ export const EXAMPLES: readonly Example[] = [
     {
         id: "ink",
         title: "INK",
-        summary: "A game. Painted ground kills the drifters, but paint takes the blitter several frames to lay, so you aim at where they are going.",
-        controls: "arrows / WASD to fly · Z to spray · X to start",
+        summary: "A game. Shots fly off in the direction you are flying and burst into a gradient of ink where they land. Painted ground kills the drifters, but the blitter takes several frames to lay a splat down, so you shoot at where they are going.",
+        controls: "arrows / WASD to fly · Z to shoot · X to start",
         load: async () => (await import("./ink/game.js")).game
     },
     {

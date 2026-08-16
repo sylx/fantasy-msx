@@ -24,7 +24,7 @@ const capture = () => readFrame(runtime.bios.system.machine, runtime.screen.pixe
 runtime.step(20);
 shots.push(capture());
 
-// Start, then fly about spraying. Held down, the spray is gated by the queue.
+// Start, then fly about shooting. Held down, the trigger is gated by the queue.
 hold(BUTTON.B, 2);
 runtime.step(4);
 hold(BUTTON.A, 20);
