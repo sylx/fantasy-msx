@@ -4,37 +4,21 @@
 import { writeFileSync } from "node:fs";
 import { boot } from "../src/index.js";
 import { demo } from "../examples/wire/demo.js";
+import { readFrame, tile } from "./capture.js";
 import { encodePNG } from "./png.js";
 
 const runtime = boot();
 runtime.run(demo);
 
-function capture(): { pixels: Uint32Array; width: number; height: number } {
-    const frame = runtime.bios.system.machine.getFrame()!;
-    const image = frame.source.imageData!;
-    const all = new Uint32Array(image.data.buffer);
-    const pixels = new Uint32Array(frame.width * frame.height);
-    for (let y = 0; y < frame.height; ++y) {
-        pixels.set(all.subarray(y * image.width, y * image.width + frame.width), y * frame.width);
-    }
-    return { pixels, width: frame.width, height: frame.height };
-}
-
-const shots: Array<ReturnType<typeof capture>> = [];
+const shots = [];
 for (const at of [10, 40, 80, 140]) {
     while (runtime.frame < at) runtime.step();
-    shots.push(capture());
+    // SCREEN 7 pixels are tall, so the rows get doubled on the way out.
+    shots.push(readFrame(runtime.bios.system.machine, runtime.screen.pixelAspect));
 }
 
-const { width: w, height: h } = shots[0];
-const gap = 2;
-const sheet = new Uint32Array(w * (h * shots.length + gap * (shots.length - 1)));
-sheet.fill(0xff303030);
-shots.forEach((shot, i) => {
-    const oy = i * (h + gap);
-    for (let y = 0; y < h; ++y) sheet.set(shot.pixels.subarray(y * w, (y + 1) * w), (oy + y) * w);
-});
+const sheet = tile(shots, 1);
 
 const out = process.argv[2] ?? "wire.png";
-writeFileSync(out, encodePNG(sheet, w, h * shots.length + gap * (shots.length - 1)));
-console.log(`${out}: ${w}x${h} frames at 10, 40, 80, 140  (bgm ${runtime.bgm.playing ? "playing" : "silent"})`);
+writeFileSync(out, encodePNG(sheet.pixels, sheet.width, sheet.height));
+console.log(`${out}: ${shots[0].width}x${shots[0].height} frames at 10, 40, 80, 140  (bgm ${runtime.bgm.playing ? "playing" : "silent"})`);

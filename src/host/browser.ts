@@ -85,15 +85,19 @@ export class BrowserHost implements Host {
         });
     }
 
-    present(frame: Frame | null): void {
+    present(frame: Frame | null, pixelAspect = 1): void {
         const { width, height } = this.canvas;
         this.context.fillStyle = this.options.background ?? "#000";
         this.context.fillRect(0, 0, width, height);
         if (!frame) return;
 
+        // Scale by the picture's true width, not its pixel count: a 512-pixel
+        // mode fills the same screen as a 256-pixel one, so both come out the
+        // same size and neither is stretched.
+        const trueWidth = frame.width * pixelAspect;
         const scale = this.options.scale
-            ?? Math.max(1, Math.floor(Math.min(width / frame.width, height / frame.height)));
-        const drawWidth = frame.width * scale;
+            ?? Math.max(1, Math.floor(Math.min(width / trueWidth, height / frame.height)));
+        const drawWidth = Math.round(trueWidth * scale);
         const drawHeight = frame.height * scale;
 
         this.context.drawImage(

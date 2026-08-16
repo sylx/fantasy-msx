@@ -204,3 +204,30 @@ describe("the example game", () => {
         expect(runtime.bios.system.machine.getFrame()).not.toBeNull();
     });
 });
+
+describe("Pixel aspect", () => {
+    it("calls a 256-pixel mode square and a 512-pixel one tall", () => {
+        const runtime = boot();
+        expect(runtime.screen.pixelAspect).toBe(1);
+
+        // SCREEN 7 fits 512 columns into the same picture width, so each pixel
+        // is half as wide as it is tall.
+        runtime.screen.setMode("G6");
+        expect(runtime.screen.pixelAspect).toBe(0.5);
+    });
+
+    it("passes it to the host with every frame", () => {
+        const host = new HeadlessHost();
+        const runtime = boot({ host });
+        runtime.run({ update: () => {} });
+
+        runtime.step();
+        expect(host.pixelAspect).toBe(1);
+
+        runtime.screen.setMode("G6");
+        runtime.step();
+        expect(host.pixelAspect).toBe(0.5);
+        // The signal really is twice as wide, which is what the host corrects for.
+        expect(host.frame!.width).toBeGreaterThan(500);
+    });
+});

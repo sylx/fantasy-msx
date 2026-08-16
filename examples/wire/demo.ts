@@ -54,7 +54,15 @@ interface Projected {
     depth: number;
 }
 
-function project(vertex: readonly [number, number, number], yaw: number, pitch: number, scale: number): Projected {
+/**
+ * `stretch` is how many horizontal pixels make up one pixel's worth of height.
+ * In SCREEN 7 that is two, because the pixels are half as wide as they are
+ * tall - project without it and a sphere comes out an egg.
+ */
+function project(
+    vertex: readonly [number, number, number],
+    yaw: number, pitch: number, scale: number, stretch: number
+): Projected {
     const [vx, vy, vz] = vertex;
 
     // Yaw about Y, then pitch about X.
@@ -65,7 +73,7 @@ function project(vertex: readonly [number, number, number], yaw: number, pitch: 
 
     const k = FOCAL / dz;
     return {
-        x: CENTRE_X + sx * scale * k,
+        x: CENTRE_X + sx * scale * k * stretch,
         y: CENTRE_Y + sy * scale * k,
         depth: Math.max(0, Math.min(1, (CAMERA + RADIUS - dz) / (RADIUS * 2)))
     };
@@ -115,12 +123,12 @@ function floor(gfx: Context["gfx"], time: number): void {
     }
 }
 
-function solid(gfx: Context["gfx"], time: number): void {
+function solid(gfx: Context["gfx"], time: number, stretch: number): void {
     const yaw = time * 0.7;
     const pitch = Math.sin(time * 0.41) * 0.8;
-    const scale = 0.78 + 0.14 * Math.sin(time * 0.9);
+    const scale = 0.62 + 0.11 * Math.sin(time * 0.9);
 
-    const points = VERTICES.map((vertex) => project(vertex, yaw, pitch, scale));
+    const points = VERTICES.map((vertex) => project(vertex, yaw, pitch, scale, stretch));
 
     // Far edges first, so near ones draw over them - a painter's sort, which is
     // all a wireframe needs.
@@ -166,7 +174,7 @@ export const demo: App = {
         // Redrawn whole, every frame, on the page that is not being shown.
         gfx.now.clear(1);
         floor(gfx, state.time * 1.6);
-        solid(gfx, state.time);
+        solid(gfx, state.time, 1 / screen.pixelAspect);
 
         gfx.now.text(8, 6, "W I R E", 15);
         gfx.now.text(8, 18, "SCREEN 7 - 512x212 - 16 OF 512 COLOURS", 9);

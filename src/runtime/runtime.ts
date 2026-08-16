@@ -46,8 +46,12 @@ export interface Host {
      * - input to wire events to, and the machine to pull audio from.
      */
     attach?(runtime: Runtime): void;
-    /** Shows a finished frame. */
-    present(frame: Frame | null): void;
+    /**
+     * Shows a finished frame. `pixelAspect` is the width of one of its pixels
+     * against its height, relative to the 256-pixel modes: 1 for those, and
+     * 0.5 for the 512-pixel ones, whose pixels are tall.
+     */
+    present(frame: Frame | null, pixelAspect: number): void;
     /** Begins calling `tick` at 60Hz. */
     start(tick: () => void): void;
     stop(): void;
@@ -121,7 +125,7 @@ export class Runtime implements Context {
         this.bios.screen.frame();
         ++this.frameCount;
 
-        this.host.present(this.bios.system.machine.getFrame());
+        this.host.present(this.bios.system.machine.getFrame(), this.screen.pixelAspect);
         // Latch last: anything the host delivered between frames must still
         // read as newly pressed when the next update looks at it.
         this.input.latch();

@@ -5,6 +5,7 @@
 
 import { writeFileSync } from "node:fs";
 import { createSystem, MODES, OP } from "../src/api/index.js";
+import { readFrame } from "./capture.js";
 import { encodePNG } from "./png.js";
 
 const { vdp, machine } = createSystem();
@@ -42,14 +43,8 @@ for (let i = 0; i < 12; ++i) {
     settle();
 }
 
-const frame = machine.getFrame()!;
-const image = frame.source.imageData!;
-const all = new Uint32Array(image.data.buffer);
-const pixels = new Uint32Array(frame.width * frame.height);
-for (let y = 0; y < frame.height; ++y) {
-    pixels.set(all.subarray(y * image.width, y * image.width + frame.width), y * frame.width);
-}
+const image = readFrame(machine);
 
 const out = process.argv[2] ?? "screenshot.png";
-writeFileSync(out, encodePNG(pixels, frame.width, frame.height));
-console.log(`${out}: ${frame.width}x${frame.height} (${MODES.G4.name}), ${machine.frames} frames, ${machine.cycles} cycles`);
+writeFileSync(out, encodePNG(image.pixels, image.width, image.height));
+console.log(`${out}: ${image.width}x${image.height} (${MODES.G4.name}), ${machine.frames} frames, ${machine.cycles} cycles`);

@@ -64,6 +64,18 @@ export class Screen {
         return this.vdp.mode.width;
     }
 
+    /**
+     * How wide a pixel is against how tall, relative to the 256-pixel modes.
+     *
+     * The V9938 paints the same picture width whatever the mode, so SCREEN 6
+     * and 7 get their 512 columns by halving the pixel rather than widening the
+     * screen. Their pixels really are tall, and a host that draws them square
+     * shows a picture stretched to twice its proper width.
+     */
+    get pixelAspect(): number {
+        return 256 / this.vdp.mode.width;
+    }
+
     get height(): number {
         return this.vdp.mode.height;
     }

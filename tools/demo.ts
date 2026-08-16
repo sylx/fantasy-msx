@@ -3,6 +3,7 @@
 
 import { writeFileSync } from "node:fs";
 import { createBios } from "../src/bios/index.js";
+import { readFrame, tile } from "./capture.js";
 import { encodePNG } from "./png.js";
 
 const { screen, gfx, sprites, system } = createBios();
@@ -33,35 +34,15 @@ for (let i = 0; i <= 12; ++i) gfx.line(145, 61, 145 + i * 7, 139, 8 + (i & 7));
 gfx.text(14, 158, "queued: fills, lines, glyphs", 11);
 
 const SNAPSHOTS = [1, 2, 4, 10];
-const shots: Array<{ pixels: Uint32Array; width: number; height: number; label: number }> = [];
+const shots = [];
 
 for (let frame = 1; frame <= SNAPSHOTS[SNAPSHOTS.length - 1]; ++frame) {
     screen.frame();
-    if (!SNAPSHOTS.includes(frame)) continue;
-
-    const rendered = system.machine.getFrame()!;
-    const image = rendered.source.imageData!;
-    const all = new Uint32Array(image.data.buffer);
-    const pixels = new Uint32Array(rendered.width * rendered.height);
-    for (let y = 0; y < rendered.height; ++y) {
-        pixels.set(all.subarray(y * image.width, y * image.width + rendered.width), y * rendered.width);
-    }
-    shots.push({ pixels, width: rendered.width, height: rendered.height, label: frame });
+    if (SNAPSHOTS.includes(frame)) shots.push(readFrame(system.machine, screen.pixelAspect));
 }
 
-// Tile the snapshots 2x2 with a one pixel gap.
-const { width: w, height: h } = shots[0];
-const gap = 2;
-const sheet = new Uint32Array((w * 2 + gap) * (h * 2 + gap));
-sheet.fill(0xff303030);
-shots.forEach((shot, i) => {
-    const ox = (i % 2) * (w + gap);
-    const oy = ((i / 2) | 0) * (h + gap);
-    for (let y = 0; y < h; ++y) {
-        sheet.set(shot.pixels.subarray(y * w, (y + 1) * w), (oy + y) * (w * 2 + gap) + ox);
-    }
-});
+const sheet = tile(shots, 2);
 
 const out = process.argv[2] ?? "demo.png";
-writeFileSync(out, encodePNG(sheet, w * 2 + gap, h * 2 + gap));
+writeFileSync(out, encodePNG(sheet.pixels, sheet.width, sheet.height));
 console.log(`${out}: frames ${SNAPSHOTS.join(", ")} after ${SNAPSHOTS.at(-1)} frames of drawing`);

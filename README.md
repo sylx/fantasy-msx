@@ -190,6 +190,13 @@ across is more pixels than the chip could push in a frame, and with TypeScript
 in the CPU's seat, drawing it in software is free. Four FM voices hold the
 chords over a PSG bass.
 
+Its pixels are not square. The V9938 paints the same picture width whatever the
+mode, so SCREEN 6 and 7 get their 512 columns by halving the pixel rather than
+widening the screen - `screen.pixelAspect` is 0.5 there and 1 everywhere else.
+Hosts scale by the picture's true width, so both modes fill the same space and
+neither comes out stretched; anything doing its own geometry has to divide by
+it, which is why WIRE projects through `1 / screen.pixelAspect`.
+
 ```bash
 npm run play -- out.png     # INK, headless, with a scripted controller
 npm run wire -- out.png     # WIRE, four frames of it

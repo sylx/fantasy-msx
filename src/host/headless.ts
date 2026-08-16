@@ -9,11 +9,14 @@ import type { Host } from "../runtime/runtime.js";
 export class HeadlessHost implements Host {
     /** The most recent frame handed over. */
     frame: Frame | null = null;
+    /** Its pixel aspect, so a tool writing an image can correct for it. */
+    pixelAspect = 1;
     /** Set when `start` is called, so a test can tell a run from a step. */
     started = false;
 
-    present(frame: Frame | null): void {
+    present(frame: Frame | null, pixelAspect = 1): void {
         this.frame = frame;
+        this.pixelAspect = pixelAspect;
     }
 
     start(): void {
