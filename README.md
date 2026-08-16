@@ -35,11 +35,11 @@ same position an MSX program's VBlank handler occupies.
 | Layer | What it is | Status |
 |-------|-----------|--------|
 | host  | canvas blit, keyboard, gamepads, audio, 60Hz clock | done |
-| L0 core | VDP, PSG, OPLL (vendored from WebMSX) | M0 done |
-| L1 API | typed register/VRAM/port access | M2 done |
-| L2 BIOS | drawing and sprites | M3 done |
-| L2 BIOS | BGM library | M4 |
-| app | `init` / `update` / `draw` | M5 done |
+| L0 core | VDP, PSG, OPLL (vendored from WebMSX) | done |
+| L1 API | typed register/VRAM/port access | done |
+| L2 BIOS | drawing and sprites | done |
+| L2 BIOS | music: MML and a frame-driven driver | done |
+| app | `init` / `update` / `draw` | done |
 
 ### Drawing takes time, and you can see it
 
@@ -227,6 +227,42 @@ samples - and on a real MSX the capacitor on the output removes it.
 
 ```bash
 npm run sound -- out.wav        # both chips put through their paces
+```
+
+### Music
+
+Tunes are written in MML, the notation MSX BASIC's `PLAY` used, and driven the
+way an MSX music driver was: once per frame, on the vertical interrupt, writing
+whatever registers changed. Nothing is scheduled ahead.
+
+```ts
+const theme = compile([
+    { voice: psgVoice(0), mml: "t150 v12 q7 l8 o5 [eagaece4 fagafcf4]2" },
+    { voice: psgVoice(1), mml: "t150 v10 q6 l4 o2 [aaaa ffff]2" },
+    { voice: opllVoice(0), mml: "t150 @8 v11 l1 o3 [af]2" },
+    { voice: rhythmVoice(), mml: "t150 v11 l8 [{cg}g{dg}g]4" }
+]);
+
+bgm.play(theme, { loop: true });
+bgm.effect(psgVoice(2), "t150 v15 l32 o6 >c< bagfedc");   // borrows a channel
+```
+
+`cdefgab` with `+`/`#`/`-`, `r` rests, `o` `<` `>` octaves, `l` default length
+and dots, `t` tempo, `v` volume, `q` gate in eighths, `@` instrument, `s`/`m`
+the PSG envelope, `w` noise, `&` ties, `[ ... ]n` repeats. Rhythm tracks spell
+drums as letters - c kick, d snare, e tom, f cymbal, g hi-hat - and brace the
+ones that land together: `{cg}8`.
+
+There are no spare channels on an MSX, so `bgm.effect` takes one away from the
+music and gives it back when the effect ends, which is what games did.
+
+Note lengths rarely fall on whole frames - an eighth at tempo 150 is 12.8 of
+them - so the compiler rounds the running total rather than each note. Tracks
+written in different subdivisions still come out exactly the same length, and a
+loop stays a loop.
+
+```bash
+npm run music -- out.wav        # eight bars, five voices
 ```
 
 ## Machine profile

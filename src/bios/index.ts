@@ -5,6 +5,7 @@ import { Blitter } from "./blitter.js";
 import { Graphics } from "./gfx.js";
 import { Raster } from "./raster.js";
 import { Screen } from "./screen.js";
+import { SoundDriver } from "./sound.js";
 import { Sprites } from "./sprites.js";
 
 export { Blitter, COST, type Job } from "./blitter.js";
@@ -13,6 +14,12 @@ export { Raster, type BlitOptions, type Rect } from "./raster.js";
 export { Screen, SPRITE_ATTRIBUTE_TABLE, SPRITE_COLOR_TABLE, SPRITE_PATTERN_TABLE } from "./screen.js";
 export { Sprites, SPRITE_COUNT, SPRITE_FLAGS, type SpriteState } from "./sprites.js";
 export { CHAR_HEIGHT, CHAR_WIDTH, FONT } from "./font.js";
+export { SoundDriver } from "./sound.js";
+export {
+    compile, compileTrack, semitoneToHz, MMLError,
+    opllVoice, psgVoice, rhythmVoice,
+    type Event, type Song, type Track, type TrackSource, type Voice
+} from "./mml.js";
 
 export interface Bios {
     readonly system: System;
@@ -22,6 +29,8 @@ export interface Bios {
     readonly sprites: Sprites;
     /** The queue behind `gfx`. Advanced automatically as the machine runs. */
     readonly blitter: Blitter;
+    /** Music and effects, stepped once per frame on the vertical interrupt. */
+    readonly bgm: SoundDriver;
 }
 
 /** Brings up a machine in SCREEN 5 with sprites ready to use. */
@@ -39,8 +48,13 @@ export function createBios(system: System = createSystem()): Bios {
         screen,
         gfx: new Graphics(screen, blitter, new Raster(system.vdp, screen)),
         sprites: new Sprites(system.vdp),
-        blitter
+        blitter,
+        bgm: new SoundDriver(system.psg, system.opll)
     };
+
+    // The driver runs on the vertical interrupt, which is where an MSX music
+    // driver hooked itself and why tempo lands on whole frames.
+    system.machine.onFrame = () => bios.bgm.tick();
     bios.sprites.setSize(16);
     bios.sprites.setEnabled(true);
 

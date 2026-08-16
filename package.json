@@ -12,7 +12,8 @@
     "vendor": "bash scripts/vendor.sh",
     "demo": "vite-node tools/demo.ts",
     "play": "vite-node tools/play.ts",
-    "sound": "vite-node tools/sound.ts"
+    "sound": "vite-node tools/sound.ts",
+    "music": "vite-node tools/music.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

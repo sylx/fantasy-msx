@@ -9,7 +9,7 @@
 // that its pace is visible. Smaller ones finish inside a frame and look
 // instant, which is equally true of the hardware.
 
-import { BUTTON, type App, type Context } from "../src/index.js";
+import { BUTTON, compile, opllVoice, psgVoice, rhythmVoice, type App, type Context } from "../src/index.js";
 
 const SHIP = 0;
 const STARS = 80;
@@ -39,8 +39,19 @@ function stars(gfx: Context["gfx"]): void {
     }
 }
 
+/** Eight bars of A minor - F - C - G, looping. */
+const THEME = compile([
+    { voice: psgVoice(0), mml: "t150 v12 q7 l8 o5 [eagaece4 fagafcf4 egecgec4 dgfgdbg4]2" },
+    { voice: psgVoice(1), mml: "t150 v10 q6 l4 o2 [aaaa ffff cccc gggg]2" },
+    { voice: opllVoice(0), mml: "t150 @8 v11 l1 o3 [afcg]2" },
+    { voice: rhythmVoice(), mml: "t150 v11 l8 [{cg}g{dg}g{cg}g{dg}g]8" }
+]);
+
+/** A falling zap. It borrows the third PSG channel from the music for a moment. */
+const ZAP = "t150 v15 q8 l32 o6 >c< b a g f e d c";
+
 export const game: App = {
-    init({ screen, gfx, sprites }: Context) {
+    init({ screen, gfx, sprites, bgm }: Context) {
         // Module-level state, so reset it: the same app can be run more than
         // once in a process, by a test or a screenshot tool.
         state.x = 120;
@@ -71,9 +82,11 @@ export const game: App = {
             color: [15, 15, 14, 14, 9, 9, 9, 8, 8, 8, 8, 6, 6, 4, 4, 4]
         });
         sprites.setActiveCount(1);
+
+        bgm.play(THEME, { loop: true });
     },
 
-    update({ input, sprites, gfx }: Context) {
+    update({ input, sprites, gfx, bgm }: Context) {
         const { x: dx, y: dy } = input.axis();
         state.x = Math.max(0, Math.min(240, state.x + dx * 3));
         state.y = Math.max(0, Math.min(196, state.y + dy * 3));
@@ -88,6 +101,7 @@ export const game: App = {
             const radius = 48 + ((random() * 32) | 0);
             gfx.fillCircle(state.x + 8, state.y + 8, radius, 8 + ((random() * 2) | 0));
             gfx.circle(state.x + 8, state.y + 8, radius + 3, 15);
+            bgm.effect(psgVoice(2), ZAP);
             state.cooldown = 8;
         }
 
