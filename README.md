@@ -37,11 +37,29 @@ same position an MSX program's VBlank handler occupies.
 | host  | canvas blit, AudioWorklet, frame clock | M0 partial |
 | L0 core | VDP, PSG, OPLL (vendored from WebMSX) | M0 done |
 | L1 API | typed register/VRAM/port access | M2 done |
-| L2 BIOS | drawing and BGM libraries | M3 / M4 |
+| L2 BIOS | drawing and sprites | M3 done |
+| L2 BIOS | BGM library | M4 |
 | app | `init` / `update` / `draw` | M5 |
 
-L2 drawing is built on the VDP's command engine rather than a software
-rasteriser. That is the thing this console has that other fantasy consoles do not.
+### Why drawing is done in software
+
+Removing the Z80 makes TypeScript infinitely fast relative to the VDP: writing
+VRAM directly costs no emulated time at all, while the chip's own blitter still
+runs at 1988 speed. Measured on a full 256x212 screen:
+
+| operation | covered in one frame |
+|-----------|---------------------|
+| `vdp.cmd.fill` (LMMV, per pixel) | 6% |
+| `vdp.cmd.copyBytes` (HMMM, per byte) | 27% |
+| `vdp.cmd.fillBytes` (HMMV, per byte) | 49% |
+| `gfx.clear` (TypeScript into VRAM) | 100%, and 0 cycles |
+
+So `gfx` writes VRAM itself. The blitter stays available through `vdp.cmd` for
+when its timing is the point.
+
+What the V9938 still does that software cannot undercut: 32 hardware sprites
+composited per scanline for free, a 512-colour palette, four framebuffer pages
+to flip between, and the scroll registers.
 
 ## Using the low-level API
 
@@ -70,6 +88,41 @@ byte-wise `fillBytes` takes 3 - the same trade a real V9938 imposes.
 
 Registers stay reachable at all times: `vdp.write(9, 0x80)` and
 `vdp.cmd.execute(...)` do exactly what a Z80 `OUT` would.
+
+## Using the BIOS
+
+```ts
+import { createBios } from "./src/bios/index.js";
+
+const { screen, gfx, sprites } = createBios();   // SCREEN 5, sprites enabled
+
+screen.useDoubleBuffer();                        // draw on page 1, show page 0
+
+gfx.clear(1);
+gfx.fillCircle(128, 106, 40, 10);
+gfx.rect(8, 8, 240, 196, 15);
+gfx.text(12, 12, "HELLO", 15);
+
+sprites.setPatternFromBitmap(0, [
+    "..####..",
+    ".######.",
+    "########",
+    "########",
+    "########",
+    "########",
+    ".######.",
+    "..####.."
+]);
+sprites.set(0, { x: 100, y: 60, pattern: 0, color: [15, 15, 11, 11, 9, 9, 6, 6] });
+sprites.setActiveCount(1);
+
+screen.flip();
+screen.frame();
+```
+
+Sprite colours may be given per line, which is a V9938 feature with no
+equivalent on an MSX1: one sprite, shaded, instead of two stacked.
+
 
 ## Machine profile
 
