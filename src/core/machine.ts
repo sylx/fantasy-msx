@@ -11,7 +11,7 @@
 // handler: writes land before the raster reaches them.
 
 import wmsxNamespace from "./vendor/index.js";
-import type { AudioSignal, FrameSource, Monitor, VDP, VideoSignal, WmsxNamespace } from "./types.js";
+import type { AudioSignal, FrameSource, Monitor, OpllChip, PsgChip, VDP, VideoSignal, WmsxNamespace } from "./types.js";
 
 const wmsx = wmsxNamespace as WmsxNamespace;
 
@@ -143,6 +143,8 @@ class FrameCollector implements Monitor {
 
 export class FantasyMachine {
     readonly vdp: VDP;
+    readonly psg: PsgChip;
+    readonly opll: OpllChip;
 
     private readonly cpu = new CycleCounter();
     private readonly audioSocket: AudioSocket;
@@ -168,12 +170,30 @@ export class FantasyMachine {
         // frame() instead, so this stays empty.
         const vSyncConnection = { vSyncPulse: () => {} };
 
+        // The OPLL registers itself on the I/O bus when connected. With no Z80
+        // there are no port reads to service, so the bus accepts and forgets.
+        const bus = {
+            connectInputDevice: () => {}, connectOutputDevice: () => {},
+            disconnectInputDevice: () => {}, disconnectOutputDevice: () => {}
+        };
+        Object.assign(machine, { bus });
+
         this.vdp = new wmsx.VDP(machine, this.cpu, vSyncConnection);
         this.vdp.setMachineType(MACHINE_TYPE_MSX2);
         this.vdp.setVideoStandard(wmsx.VideoStandard.NTSC);
         this.vdp.setVSynchMode(0);                       // off -> TIMER pulldown -> 262 lines/pulse
         this.vdp.getVideoSignal().connectMonitor(this.collector);
         this.vdp.powerOn();
+
+        this.psg = new wmsx.PSGAudio();
+        this.psg.setAudioSocket(this.audioSocket);
+        this.psg.powerOn();
+
+        // The OPLL attaches its audio signal lazily, on the first register
+        // write, so it costs nothing until a program actually uses FM.
+        this.opll = new wmsx.YM2413Audio("OPLL");
+        this.opll.connect(machine);
+        this.opll.powerOn();
     }
 
     /** Advances the machine by exactly one frame (262 scanlines). */
@@ -203,9 +223,16 @@ export class FantasyMachine {
         return this.cpu.intPending;
     }
 
+    /** Pulls the accumulated audio for the last frame from every connected chip. */
+    getAudioSignals(): readonly AudioSignal[] {
+        return this.audioSocket.getSignals();
+    }
+
     reset(): void {
         this.cpu.reset();
         this.vdp.reset();
+        this.psg.reset();
+        this.opll.reset();
         this.frameCount = 0;
     }
 }

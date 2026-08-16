@@ -61,10 +61,38 @@ export interface AudioSignal {
     retrieveSamples(quant: number, mute: boolean): Float32Array | null;
 }
 
+/** AY-3-8910 / YM2149 sound generator, as the vendored core exposes it. */
+export interface PsgChip {
+    setPeriodA(period: number): void;
+    setPeriodB(period: number): void;
+    setPeriodC(period: number): void;
+    setPeriodN(period: number): void;
+    setPeriodE(period: number): void;
+    setAmplitudeA(amplitude: number): void;
+    setAmplitudeB(amplitude: number): void;
+    setAmplitudeC(amplitude: number): void;
+    setMixerControl(control: number): void;
+    setEnvelopeControl(control: number): void;
+    setAudioSocket(socket: unknown): void;
+    powerOn(): void;
+    powerOff(): void;
+    reset(): void;
+}
+
+/** YM2413 (OPLL), driven through its MSX-MUSIC ports 0x7C / 0x7D. */
+export interface OpllChip {
+    output7C(value: number): void;      // register select
+    output7D(value: number): void;      // register data
+    connect(machine: unknown): void;
+    powerOn(): void;
+    powerOff(): void;
+    reset(): void;
+}
+
 export interface WmsxNamespace {
     VDP: new (machine: unknown, cpu: unknown, vSyncConnection: unknown) => VDP;
-    PSGAudio: new (secondary?: boolean) => any;
-    YM2413Audio: new (...args: any[]) => any;
+    PSGAudio: new (secondary?: boolean) => PsgChip;
+    YM2413Audio: new (name?: string) => OpllChip;
     VideoStandard: { NTSC: unknown; PAL: unknown };
     Util: any;
 }

@@ -30,7 +30,10 @@ if (!globalThis.wmsx.CPU) globalThis.wmsx.CPU = { BASE_CLOCK: 3584160 };
 
 // The VDP compares its configured type against these. We only ever use MSX2.
 if (!globalThis.wmsx.Machine) globalThis.wmsx.Machine = {
-    MACHINE_TYPE: { MSX1: 1, MSX2: 2, MSX2P: 3, MSXTR: 4 }
+    MACHINE_TYPE: { MSX1: 1, MSX2: 2, MSX2P: 3, MSXTR: 4 },
+    // AudioSignal divides this by a chip's sample rate to pick its resampler:
+    // /32 gives the PSG's 112005 Hz, /72 the OPLL's 49780 Hz.
+    BASE_CPU_CLOCK: 3584160
 };
 
 // --- WMSX: configuration --------------------------------------------------

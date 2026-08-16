@@ -1,4 +1,5 @@
 import type { Frame } from "../src/core/machine.js";
+import type { ScreenMode } from "../src/api/v9938.js";
 
 /**
  * Reads back the pixels of a frame rendered under the headless canvas shim.
@@ -33,4 +34,27 @@ export function colorHistogram(pixels: Uint32Array): Array<{ color: string; coun
     return [...counts.entries()]
         .sort((a, b) => b[1] - a[1])
         .map(([color, count]) => ({ color: "0x" + (color >>> 0).toString(16).padStart(8, "0"), count }));
+}
+
+/**
+ * Crops a frame to its active display, dropping the borders. The VDP centres
+ * the active area in the signal, so the border is half the difference.
+ */
+export function activePixels(frame: Frame, mode: ScreenMode): { pixels: Uint32Array; width: number; height: number } {
+    const all = framePixels(frame);
+    const left = (frame.width - mode.width) >> 1;
+    const top = (frame.height - mode.height) >> 1;
+    const out = new Uint32Array(mode.width * mode.height);
+    for (let y = 0; y < mode.height; ++y) {
+        const row = (top + y) * frame.width + left;
+        out.set(all.subarray(row, row + mode.width), y * mode.width);
+    }
+    return { pixels: out, width: mode.width, height: mode.height };
+}
+
+export function pixelAt(frame: Frame, mode: ScreenMode, x: number, y: number): number {
+    const all = framePixels(frame);
+    const left = (frame.width - mode.width) >> 1;
+    const top = (frame.height - mode.height) >> 1;
+    return all[(top + y) * frame.width + (left + x)];
 }
