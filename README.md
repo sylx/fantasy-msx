@@ -156,11 +156,25 @@ Sprite colours may be given per line, which is a V9938 feature with no
 equivalent on an MSX1: one sprite, shaded, instead of two stacked.
 
 
-## Writing a game
+## INK
+
+`examples/` holds a game rather than a demo, because the machine's oddities only
+make sense once something is built out of them.
+
+You fly a ship and spray paint. Painted ground kills the drifters, but paint
+arrives over several frames, so you lay it where a drifter is *going*. The
+drifters scrub the ground they cross. The framebuffer is not a picture of the
+game - it *is* the game state, read back with `gfx.getPixel`. The ink gauge in
+the status bar is `gfx.work`: the blitter's backlog, doubling as your reload.
+
+Every actor is a hardware sprite, so none of them cost anything. The music is
+MML on the PSG and OPLL, and firing borrows a PSG channel for the spray.
 
 ```bash
 npm run dev
 ```
+
+## Writing a game
 
 ```ts
 import { BUTTON, run, type Context } from "./src/index.js";
@@ -284,9 +298,23 @@ npm run play -- out.png          # the example, headless, with scripted input
 `src/core/vendor/` is generated. Edit `scripts/vendor.sh`, never the files it
 writes - the copies are verbatim so upstream changes stay reviewable as a diff.
 
-## License
+## Deploying
 
-The vendored WebMSX sources carry `Copyright 2015 by Paulo Augusto Peccin` and
-refer to a `license.txt` that is **not present in the WebMSX repository**. The
-terms of reuse are therefore unconfirmed, and must be settled with the author
-before this project is distributed.
+`npm run build` writes a self-contained `dist/` with relative asset paths, so it
+works from any subpath. `.github/workflows/pages.yml` builds it on every push to
+`main` - typecheck, tests, then build - and publishes to GitHub Pages. The
+WebMSX submodule is not checked out there: its core is vendored into the repo,
+and the submodule only exists so `npm run vendor` can refresh it.
+
+Enable it once under Settings, Pages, Source: GitHub Actions.
+
+## Credit and licensing
+
+The chip emulation is WebMSX by **Paulo Augusto Peccin**, vendored under
+`src/core/vendor/` and copied verbatim so its provenance stays visible in the
+diff. Every file keeps its original copyright header.
+
+Those headers refer to a `license.txt` that is not present in the WebMSX
+repository, so the terms of reuse are unconfirmed. This is fine for something
+shared privately, which is what this is. Anyone thinking of putting it in front
+of a wider audience should settle the terms with the author first.

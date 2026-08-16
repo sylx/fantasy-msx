@@ -143,29 +143,64 @@ describe("Input", () => {
 });
 
 describe("the example game", () => {
-    it("moves its sprite with the controller and queues work with the trigger", () => {
+    function start() {
         const runtime = boot();
         runtime.run(game);
-        const attributes = runtime.bios.system.vdp.vram;
-        const spriteX = () => attributes[0x07600 + 1];
+        runtime.input.setButton(BUTTON.B, true);        // X starts it
+        runtime.step(2);
+        runtime.input.setButton(BUTTON.B, false);
+        runtime.step(2);
+        return runtime;
+    }
 
-        const before = spriteX();
+    /** The player's sprite X, read straight out of the attribute table. */
+    const spriteX = (runtime: ReturnType<typeof boot>) => runtime.bios.system.vdp.vram[0x07600 + 1];
+
+    it("waits on the title screen until it is started", () => {
+        const runtime = boot();
+        runtime.run(game);
+        const before = spriteX(runtime);
+
         runtime.input.setButton(BUTTON.LEFT, true);
         runtime.step(10);
-        runtime.input.setButton(BUTTON.LEFT, false);
-        expect(spriteX()).toBeLessThan(before);
+        expect(spriteX(runtime)).toBe(before);          // nothing moves before the game begins
+    });
 
+    it("flies the ship with the controller once started", () => {
+        const runtime = start();
+        const before = spriteX(runtime);
+
+        runtime.input.setButton(BUTTON.LEFT, true);
+        runtime.step(10);
+        expect(spriteX(runtime)).toBeLessThan(before);
+    });
+
+    it("lays paint, and holds off when the queue gets deep", () => {
+        const runtime = start();
         while (runtime.gfx.busy) runtime.step();
-        const quiet = runtime.gfx.getPixel(spriteX() + 8, 158);
+        expect(runtime.gfx.getPixel(spriteX(runtime) + 8, 158)).toBeLessThan(8);
 
+        // Holding the trigger down: the game keeps spraying, but refuses while
+        // the blitter is behind, so the queue never runs away.
         runtime.input.setButton(BUTTON.A, true);
-        runtime.step(1);
-        runtime.input.setButton(BUTTON.A, false);
-        while (runtime.gfx.busy) runtime.step();
+        runtime.step(90);
 
-        // A bloom is painted in palette 8 or 9, over whatever the sky was.
-        const painted = runtime.gfx.getPixel(spriteX() + 8, 158);
-        expect(painted).not.toBe(quiet);
-        expect(painted).toBeGreaterThanOrEqual(8);
+        expect(runtime.gfx.getPixel(spriteX(runtime) + 8, 158)).toBeGreaterThanOrEqual(8);
+        expect(runtime.gfx.work).toBeLessThan(40000);
+    });
+
+    it("plays music from the moment it starts", () => {
+        const runtime = start();
+        expect(runtime.bgm.playing).toBe(true);
+    });
+
+    it("gets somewhere when played", () => {
+        const runtime = start();
+        // Fly right, spraying, for a few seconds and expect to have hit something.
+        runtime.input.setButton(BUTTON.A, true);
+        runtime.input.setButton(BUTTON.RIGHT, true);
+        runtime.step(240);
+        expect(runtime.frame).toBe(244);
+        expect(runtime.bios.system.machine.getFrame()).not.toBeNull();
     });
 });

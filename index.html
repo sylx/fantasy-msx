@@ -1,13 +1,73 @@
 <!doctype html>
+<html lang="en">
 <meta charset="utf-8">
-<title>Fantasy MSX</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>INK - Fantasy MSX</title>
+<meta name="description" content="A game running on emulated MSX2 hardware, written in TypeScript instead of Z80.">
 <style>
-    html, body { height: 100%; margin: 0; background: #14141c; color: #8d8da3; }
-    body { display: grid; place-items: center; gap: 1rem; font: 13px/1.6 ui-monospace, monospace; }
-    canvas { image-rendering: pixelated; background: #000; }
-    p { margin: 0; }
-    kbd { color: #d0d0e0; }
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: #0d0d14; color: #7d7d95; }
+    body {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 1rem; padding: 1rem; min-height: 100dvh;
+        font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    canvas {
+        image-rendering: pixelated; background: #000;
+        width: min(100%, 816px); height: auto;
+        border-radius: 3px; box-shadow: 0 0 0 1px #23233a, 0 12px 40px #0006;
+    }
+    header { text-align: center; }
+    h1 { margin: 0; font-size: 15px; letter-spacing: .28em; color: #d8d8ea; font-weight: 600; }
+    h1 span { color: #e0703a; }
+    p { margin: .25rem 0 0; }
+    kbd { color: #cfcfe4; }
+    a { color: #6f9fd8; }
+    footer { text-align: center; font-size: 12px; color: #55556b; }
+
+    /* Touch controls, only where there is no keyboard to speak of. */
+    .pad { display: none; gap: 2rem; align-items: center; user-select: none; touch-action: none; }
+    @media (pointer: coarse) { .pad { display: flex; } }
+    .dpad { display: grid; grid-template-columns: repeat(3, 3rem); grid-template-rows: repeat(3, 3rem); }
+    .pad button {
+        border: 1px solid #2c2c46; background: #16162a; color: #9a9ab8;
+        border-radius: 6px; font: inherit; font-size: 15px; margin: 2px; cursor: pointer;
+    }
+    .pad button:active { background: #2a2a48; color: #fff; }
+    .fire button { width: 3.6rem; height: 3.6rem; border-radius: 50%; }
+    .fire { display: flex; gap: .75rem; }
 </style>
+
+<header>
+    <h1>I<span>N</span>K</h1>
+    <p>a game on emulated MSX2 hardware, written in TypeScript</p>
+</header>
+
 <canvas width="816" height="684"></canvas>
-<p><kbd>arrows</kbd> or <kbd>WASD</kbd> to move &middot; <kbd>Z</kbd> to fire &middot; watch the queue drain</p>
+
+<p>
+    <kbd>arrows</kbd> or <kbd>WASD</kbd> to fly &middot;
+    <kbd>Z</kbd> to spray &middot;
+    <kbd>X</kbd> to start
+</p>
+
+<div class="pad">
+    <div class="dpad">
+        <span></span><button data-button="up">&uarr;</button><span></span>
+        <button data-button="left">&larr;</button><span></span><button data-button="right">&rarr;</button>
+        <span></span><button data-button="down">&darr;</button><span></span>
+    </div>
+    <div class="fire">
+        <button data-button="b">X</button>
+        <button data-button="a">Z</button>
+    </div>
+</div>
+
+<footer>
+    V9938 video, AY-3-8910 and YM2413 sound, emulated by
+    <a href="https://github.com/ppeccin/WebMSX">WebMSX</a>. No Z80.
+</footer>
+
 <script type="module" src="/examples/main.ts"></script>
+</html>

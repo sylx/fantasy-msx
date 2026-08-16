@@ -1,6 +1,6 @@
-// Runs the example headlessly with a scripted controller and tiles four
-// moments into one image. Proof that the loop, the input and the queue work
-// without a browser in the way - and that the chip's pace is visible.
+// Plays the example headlessly with a scripted controller and tiles four
+// moments into one image - proof that the loop, input, sprites, blitter and
+// driver all work together without a browser in the way.
 
 import { writeFileSync } from "node:fs";
 import { BUTTON, boot } from "../src/index.js";
@@ -8,9 +8,9 @@ import { game } from "../examples/game.js";
 import { encodePNG } from "./png.js";
 
 const runtime = boot();
-runtime.run(game);              // the headless host does not start a clock
+runtime.run(game);
 
-function tap(button: number, frames = 1): void {
+function hold(button: number, frames: number): void {
     runtime.input.setButton(button as never, true);
     runtime.step(frames);
     runtime.input.setButton(button as never, false);
@@ -27,24 +27,29 @@ function capture(): { pixels: Uint32Array; width: number; height: number } {
     return { pixels, width: frame.width, height: frame.height };
 }
 
-// Fly about and fire a couple of blooms.
-runtime.step(4);
-tap(BUTTON.LEFT, 14);
-tap(BUTTON.A);
-runtime.step(10);
-tap(BUTTON.RIGHT, 26);
-tap(BUTTON.A);
-while (runtime.gfx.busy) runtime.step();
-const shots = [capture()];
+const shots: Array<ReturnType<typeof capture>> = [];
 
-// Then a full-screen wipe, caught while the chip is still working through it.
-tap(BUTTON.B);
-for (const frames of [4, 10]) {
-    runtime.step(frames);
-    shots.push(capture());
-}
-while (runtime.gfx.busy) runtime.step();
-runtime.step(1);
+// The title screen, waiting to be started.
+runtime.step(20);
+shots.push(capture());
+
+// Start, then fly about spraying. Held down, the spray is gated by the queue.
+hold(BUTTON.B, 2);
+runtime.step(4);
+hold(BUTTON.A, 20);
+hold(BUTTON.LEFT, 10);
+hold(BUTTON.A, 20);
+shots.push(capture());
+
+runtime.input.setButton(BUTTON.RIGHT as never, true);
+hold(BUTTON.A, 40);
+runtime.input.setButton(BUTTON.RIGHT as never, false);
+runtime.input.setButton(BUTTON.DOWN as never, true);
+hold(BUTTON.A, 40);
+runtime.input.setButton(BUTTON.DOWN as never, false);
+shots.push(capture());
+
+runtime.step(120);
 shots.push(capture());
 
 const { width: w, height: h } = shots[0];
