@@ -9,6 +9,10 @@ replaced is the Z80 - your game logic is TypeScript sitting in the CPU's seat.
 The chip emulators come from [WebMSX](https://github.com/ppeccin/WebMSX) by Paulo
 Augusto Peccin, vendored under `src/core/vendor/`.
 
+## Demo
+
+https://sylx.github.io/fantasy-msx/
+
 ## How it works
 
 In a real MSX - and in WebMSX - the VDP is the master clock. It walks 262
