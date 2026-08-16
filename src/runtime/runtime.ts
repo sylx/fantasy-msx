@@ -39,8 +39,11 @@ export interface App {
 
 /** Where frames go and what drives the clock. */
 export interface Host {
-    /** Wires up event sources - keyboard, gamepads - to the runtime's input. */
-    attach?(input: Input): void;
+    /**
+     * Called once, with the runtime, so the host can reach the things it needs
+     * - input to wire events to, and the machine to pull audio from.
+     */
+    attach?(runtime: Runtime): void;
     /** Shows a finished frame. */
     present(frame: Frame | null): void;
     /** Begins calling `tick` at 60Hz. */
@@ -57,7 +60,7 @@ export class Runtime implements Context {
     private running = false;
 
     constructor(readonly bios: Bios, private readonly host: Host) {
-        this.host.attach?.(this.input);
+        this.host.attach?.(this);
     }
 
     get screen(): Screen {

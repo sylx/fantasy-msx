@@ -162,6 +162,3 @@ export class Sprites {
         return (this.vdp.status(S.INTERRUPT) & S0.FIFTH_SPRITE) !== 0;
     }
 }
-
-/** Re-exported so callers can build R1 sprite bits by hand if they want to. */
-export { R1 };

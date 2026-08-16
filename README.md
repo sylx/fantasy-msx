@@ -34,7 +34,7 @@ same position an MSX program's VBlank handler occupies.
 
 | Layer | What it is | Status |
 |-------|-----------|--------|
-| host  | canvas blit, keyboard, gamepads, 60Hz clock | M5 done |
+| host  | canvas blit, keyboard, gamepads, audio, 60Hz clock | done |
 | L0 core | VDP, PSG, OPLL (vendored from WebMSX) | M0 done |
 | L1 API | typed register/VRAM/port access | M2 done |
 | L2 BIOS | drawing and sprites | M3 done |
@@ -196,6 +196,38 @@ run up to three frames to catch up before it gives up on the lost time.
 big enough that the blitter visibly grinds them out, a full-screen wipe on odd
 coordinates that takes most of a third of a second, and a readout drawn
 immediately so it never lags behind what it is reporting.
+
+## Sound
+
+Both chips are wired and clocked from the same scanline events the VDP hands
+out, so audio advances with the picture rather than alongside it.
+
+```ts
+const { psg, opll } = createSystem();
+
+psg.setTone(0, 440);                    // Hz, converted to the chip's period
+psg.setVolume(0, 13);
+psg.setMixer([true, false, false]);     // tone on channel A only
+
+opll.play(0, 220, INSTRUMENT.ORGAN);    // instrument, pitch and key-on at once
+opll.setRhythmMode(true);
+opll.triggerRhythm(RHYTHM.BASS_DRUM | RHYTHM.HI_HAT);
+```
+
+The PSG generates at 112005 Hz and the OPLL at 49780, neither of which any
+sound card wants, so `AudioMixer` pulls a frame from each, resamples by
+averaging - picking one sample of two would alias the PSG's squares badly - and
+sums them. In a browser `BrowserHost` opens an AudioWorklet and feeds it a
+frame at a time; the worklet is only a sink, since the emulator has to stay on
+the main thread.
+
+The mixer also strips DC. A PSG channel with its mixer bit off still drives its
+amplitude out as a steady level - that is how the chip was made to play
+samples - and on a real MSX the capacitor on the output removes it.
+
+```bash
+npm run sound -- out.wav        # both chips put through their paces
+```
 
 ## Machine profile
 

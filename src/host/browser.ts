@@ -3,7 +3,8 @@
 
 import type { Frame } from "../core/machine.js";
 import { BUTTON, type Button, type Input, type Player } from "../runtime/input.js";
-import { FRAME_RATE, type Host } from "../runtime/runtime.js";
+import { FRAME_RATE, type Host, type Runtime } from "../runtime/runtime.js";
+import { WebAudioOutput } from "./audio.js";
 
 const FRAME_SECONDS = 1 / FRAME_RATE;
 /** Never run more than this many frames to catch up, or a stall turns into a stampede. */
@@ -18,6 +19,8 @@ export interface BrowserHostOptions {
     background?: string;
     /** Read gamepads as well as the keyboard. On by default. */
     gamepads?: boolean;
+    /** Open the sound device. On by default. */
+    audio?: boolean;
 }
 
 /** Gamepad button indices, in the standard mapping, for the two triggers. */
@@ -30,6 +33,7 @@ export class BrowserHost implements Host {
     private readonly context: CanvasRenderingContext2D;
     private readonly options: BrowserHostOptions;
     private input: Input | null = null;
+    private audio: WebAudioOutput | null = null;
     private raf = 0;
     private previousTime = 0;
     private accumulator = 0;
@@ -45,25 +49,39 @@ export class BrowserHost implements Host {
         this.context.imageSmoothingEnabled = false;
     }
 
-    attach(input: Input): void {
+    attach(runtime: Runtime): void {
+        const input = runtime.input;
         this.input = input;
+
+        if (this.options.audio !== false) {
+            this.audio = new WebAudioOutput(runtime.bios.system.machine);
+            void this.audio.start();
+        }
 
         const onKey = (event: KeyboardEvent, down: boolean) => {
             if (event.repeat) return;
+            // Browsers keep audio suspended until the user does something.
+            if (down) void this.audio?.resume();
             // Swallow only the keys the machine claims, so browser shortcuts survive.
             if (input.setKey(event.code, down)) event.preventDefault();
         };
         const keyDown = (event: KeyboardEvent) => onKey(event, true);
         const keyUp = (event: KeyboardEvent) => onKey(event, false);
-        const blur = () => input.releaseAll();
+        const blur = () => {
+            input.releaseAll();
+            this.audio?.flush();
+        };
+        const gesture = () => void this.audio?.resume();
 
         window.addEventListener("keydown", keyDown);
         window.addEventListener("keyup", keyUp);
         window.addEventListener("blur", blur);
+        window.addEventListener("pointerdown", gesture);
         this.listeners.push(() => {
             window.removeEventListener("keydown", keyDown);
             window.removeEventListener("keyup", keyUp);
             window.removeEventListener("blur", blur);
+            window.removeEventListener("pointerdown", gesture);
         });
     }
 
@@ -103,6 +121,8 @@ export class BrowserHost implements Host {
                 this.accumulator -= FRAME_SECONDS;
                 this.pollGamepads();
                 tick();
+                // One frame of samples for one frame of machine time.
+                this.audio?.push();
             }
         };
         this.raf = requestAnimationFrame(loop);
@@ -113,6 +133,8 @@ export class BrowserHost implements Host {
         this.raf = 0;
         for (const remove of this.listeners) remove();
         this.listeners.length = 0;
+        void this.audio?.stop();
+        this.audio = null;
     }
 
     private pollGamepads(): void {

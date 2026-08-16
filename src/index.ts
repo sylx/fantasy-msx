@@ -13,12 +13,11 @@ import { BrowserHost } from "./host/browser.js";
 import { HeadlessHost } from "./host/headless.js";
 import { Runtime, type App, type Host } from "./runtime/runtime.js";
 
-export { createSystem, type System } from "./api/index.js";
-export * from "./api/v9938.js";
-export { Opll, Psg, Vdp, VdpCommands } from "./api/index.js";
+export * from "./api/index.js";
 export * from "./bios/index.js";
 export { BrowserHost, type BrowserHostOptions } from "./host/browser.js";
 export { HeadlessHost } from "./host/headless.js";
+export { AudioMixer, WebAudioOutput } from "./host/audio.js";
 export * from "./runtime/input.js";
 export { Runtime, FRAME_RATE, type App, type Context, type Host } from "./runtime/runtime.js";
 
