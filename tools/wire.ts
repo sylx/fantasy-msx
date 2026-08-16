@@ -24,16 +24,15 @@ runtime.input.setButton(BUTTON.B, true);
 runtime.step(1);
 runtime.input.setButton(BUTTON.B, false);
 
-// The blitter paints the page you are looking at, so a picture can be caught
-// half-built. One partway through, one complete.
-while (!runtime.gfx.busy) runtime.step();
-runtime.step(9);
-shots.push(capture());
-while (runtime.gfx.busy) runtime.step();
-// One more, so the caption carries a measured rate rather than TIMING.
-while (!runtime.gfx.busy) runtime.step();
-while (runtime.gfx.busy) runtime.step();
-shots.push(capture());
+// Two finished pictures from the blitter. It draws on the hidden page and
+// swaps, same as software, so a half-drawn one is never on screen - there is
+// just a lot longer between them.
+for (let i = 0; i < 2; ++i) {
+    while (!runtime.gfx.busy) runtime.step();
+    while (runtime.gfx.busy) runtime.step();
+    runtime.step(1);
+    shots.push(capture());
+}
 
 const sheet = tile(shots, 1);
 

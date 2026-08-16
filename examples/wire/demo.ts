@@ -14,6 +14,9 @@
 // speed the V9938 can actually clear a page and pull 512-pixel lines across
 // it, which is the same picture at a fraction of the rate - and the point of
 // having the choice.
+//
+// Either way it is drawn on the page nobody is looking at and swapped in when
+// it is whole. That is what the second page is for.
 
 import { BUTTON, compile, opllVoice, psgVoice, rhythmVoice, type App, type Context } from "../../src/index.js";
 
@@ -227,13 +230,6 @@ export const demo: App = {
             gfx.abandon();              // drop whatever the old path left queued
             state.timed = false;
             state.startedAt = frame;
-
-            // Software draws on the hidden page and swaps, so nothing is ever
-            // seen half-built. The blitter draws on the page you are looking
-            // at, because watching it clear and redraw is the whole point.
-            screen.setDrawPage(state.blitter
-                ? screen.displayPage
-                : (screen.displayPage + 1) % screen.mode.pages);
         }
 
         const stretch = 1 / screen.pixelAspect;
@@ -248,6 +244,11 @@ export const demo: App = {
 
         // Nothing to do until the chip has finished the picture it is on.
         if (gfx.busy) return;
+
+        // Show the finished page, then start the next one on the one it just
+        // replaced. Both paths draw on the page nobody is looking at: this is
+        // why the machine has two, and why MSX programs used them.
+        screen.flip();
 
         if (state.timed) state.cost = Math.max(1, frame - state.startedAt);
         state.startedAt = frame;

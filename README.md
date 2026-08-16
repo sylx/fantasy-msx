@@ -190,10 +190,10 @@ instead of drawing it in software, which is the comparison worth having: a
 whole SCREEN 7 page cleared and thirty 512-pixel edges pulled across it takes
 the chip about twelve frames, so sixty pictures a second becomes five.
 
-In software it draws on the hidden page and swaps, so nothing is ever seen
-half-built. Through the blitter it draws on the page you are looking at,
-because watching the clear sweep down and the wireframe come back is the point.
-Four FM voices hold the chords over a PSG bass.
+Either way it draws on the page nobody is looking at and swaps the finished one
+in, which is what the second page is for and what MSX programs did with it. The
+blitter does not show you a half-drawn picture; it shows you a picture five
+times a second. Four FM voices hold the chords over a PSG bass.
 
 Its pixels are not square. The V9938 paints the same picture width whatever the
 mode, so SCREEN 6 and 7 get their 512 columns by halving the pixel rather than

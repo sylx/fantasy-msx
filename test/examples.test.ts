@@ -113,14 +113,20 @@ describe("WIRE's two drawing paths", () => {
         expect(timeOneImage(runtime)).toBeGreaterThan(6);
     });
 
-    it("paints the page it is showing, so the redraw can be watched", async () => {
+    it("keeps drawing on the hidden page, so no half-drawn picture is shown", async () => {
         const runtime = await started();
         expect(runtime.screen.drawPage).not.toBe(runtime.screen.displayPage);
 
         runtime.input.setButton(BUTTON.B, true);
         runtime.step(1);
         runtime.input.setButton(BUTTON.B, false);
-        expect(runtime.screen.drawPage).toBe(runtime.screen.displayPage);
+
+        // Through a whole picture and into the next, the page being painted is
+        // never the page on screen.
+        for (let i = 0; i < 40; ++i) {
+            expect(runtime.screen.drawPage).not.toBe(runtime.screen.displayPage);
+            runtime.step();
+        }
     });
 
     it("goes back to software, and back to swapping pages", async () => {
