@@ -370,3 +370,29 @@ describe("Blitter pacing", () => {
         for (let y = 0; y < 7; ++y) expect(gfx.getPixel(0, y)).toBe(15);   // stem of the H
     });
 });
+
+describe("Blitter speed", () => {
+    it("takes proportionally longer when slowed down", () => {
+        const frames = (speed: number) => {
+            const { gfx, screen } = createBios();
+            gfx.speed = speed;
+            gfx.now.clear(0);
+            gfx.fillRect(0, 0, 256, 212, 5);
+            let count = 0;
+            while (gfx.busy) { screen.frame(); ++count; }
+            return count;
+        };
+        // Four times slower, give or take the frame it gets rounded into.
+        const slow = frames(0.25);
+        const normal = frames(1);
+        expect(slow).toBeGreaterThanOrEqual(normal * 3);
+        expect(slow).toBeLessThanOrEqual(normal * 5);
+    });
+
+    it("refuses a speed that would stall the queue forever", () => {
+        const { gfx } = createBios();
+        expect(() => { gfx.speed = 0; }).toThrow(RangeError);
+        expect(() => { gfx.speed = -1; }).toThrow(RangeError);
+        expect(gfx.speed).toBe(1);
+    });
+});

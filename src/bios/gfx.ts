@@ -56,6 +56,18 @@ export class Graphics {
         this.blitter.abandon();
     }
 
+    /**
+     * How fast the blitter works, as a multiple of the real V9938. 1 is
+     * authentic; below 1 makes the machine's work easier to watch.
+     */
+    get speed(): number {
+        return this.blitter.speed;
+    }
+
+    set speed(value: number) {
+        this.blitter.speed = value;
+    }
+
     // --- Clipping ---------------------------------------------------------
 
     /**

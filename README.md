@@ -54,16 +54,24 @@ queue is advanced from the CPU's time slices, about ten per scanline. Costs
 per pixel are measured against the emulated chip and land close to the V9938's
 published figures.
 
-| operation | covered in one frame |
-|-----------|---------------------|
-| aligned fill (byte-wise, like HMMV) | 49% of the screen |
-| aligned copy (byte-wise, like HMMM) | 27% |
-| unaligned copy (pixel-wise, like LMMM) | 5% |
-| unaligned fill (pixel-wise, like LMMV) | 6% |
+| what you draw | how long it takes |
+|---------------|------------------|
+| `fillRect` over the whole screen, even coordinates | 3 frames, 50ms |
+| `fillRect` over the whole screen, odd coordinates | 17 frames, 283ms |
+| `fillCircle` radius 100 | 10 frames, 167ms |
+| `fillCircle` radius 36 | 2 frames |
+| `fillCircle` radius 12, a line of text, a circle outline | 1 frame |
 
 Even coordinates cost an eighth of odd ones, because the chip can move whole
 bytes instead of reading, masking and writing each pixel. It is worth
 arranging your rectangles to land on them.
+
+Note the bottom of that table. Anything under about a quarter of the screen
+finishes inside a single frame, and since `draw` queues before the frame runs,
+it is complete before it is ever shown - true to the hardware, but it hides the
+hardware working. Draw big if you want the machine's pace to read, or turn
+`gfx.speed` down: it multiplies the chip's rate, 1 being authentic. That knob
+is the one thing here that is not the V9938.
 
 Jobs run in the order they were queued, and each one pins the page and clip it
 was queued with, so a later page flip cannot make an unfinished fill paint over
@@ -184,9 +192,10 @@ game that queues faster than the chip draws will fall behind - watch
 The runtime steps at a fixed 60Hz whatever the display refreshes at, and will
 run up to three frames to catch up before it gives up on the lost time.
 
-`examples/game.ts` is the whole thing in forty lines: a sprite moving at 60Hz
-for free, blooms the blitter has to grind out, and a readout drawn immediately
-so it never lags behind what it is reporting.
+`examples/game.ts` is the whole thing: a sprite moving at 60Hz for free, blooms
+big enough that the blitter visibly grinds them out, a full-screen wipe on odd
+coordinates that takes most of a third of a second, and a readout drawn
+immediately so it never lags behind what it is reporting.
 
 ## Machine profile
 

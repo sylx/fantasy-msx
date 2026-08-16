@@ -31,6 +31,12 @@ export interface BootOptions {
     host?: Host;
     /** An already-built machine, for sharing one between tools. */
     bios?: Bios;
+    /**
+     * Blitter speed as a multiple of the real V9938. 1, the default, is
+     * authentic. Below 1 makes drawing visibly slower - useful when the point
+     * is to watch the machine work.
+     */
+    blitterSpeed?: number;
 }
 
 /** Brings up a machine and a runtime, without starting the clock. */
@@ -40,7 +46,10 @@ export function boot(options: BootOptions = {}): Runtime {
             ? new BrowserHost({ canvas: options.canvas, scale: options.scale })
             : new HeadlessHost());
 
-    return new Runtime(options.bios ?? createBios(), host);
+    const bios = options.bios ?? createBios();
+    if (options.blitterSpeed !== undefined) bios.blitter.speed = options.blitterSpeed;
+
+    return new Runtime(bios, host);
 }
 
 /** Brings up a machine and runs `app` on it. */

@@ -229,8 +229,28 @@ export class TransferJob extends BaseJob {
 export class Blitter {
     private readonly queue: Job[] = [];
     private budget = 0;
+    private rate = 1;
 
     constructor(private readonly raster: Raster) {}
+
+    /**
+     * How fast the chip works, as a multiple of the real thing. 1 is the
+     * V9938's own pace; below 1 slows it down.
+     *
+     * This is the one knob here that is not hardware. Authentic timing means
+     * anything smaller than about a quarter of the screen finishes inside a
+     * single frame and is on screen before it is ever shown half-drawn - true
+     * to the machine, but it hides the machine working. Turn this down when
+     * you want the work to read at a glance.
+     */
+    get speed(): number {
+        return this.rate;
+    }
+
+    set speed(value: number) {
+        if (!(value > 0)) throw new RangeError("blitter speed must be greater than zero");
+        this.rate = value;
+    }
 
     push(job: Job): void {
         if (job.remaining > 0) this.queue.push(job);
@@ -268,7 +288,7 @@ export class Blitter {
             return;
         }
 
-        this.budget += cpuCycles * VDP_CYCLE_RATIO;
+        this.budget += cpuCycles * VDP_CYCLE_RATIO * this.rate;
 
         while (this.queue.length > 0) {
             const job = this.queue[0];
