@@ -137,10 +137,24 @@ export class Images {
 
     /** Fetches a picture and reduces it to the colours the mode can show. */
     async load(url: string, options: ReduceOptions = {}): Promise<IndexedImage> {
-        return this.reduce(await this.decoder(url), options);
+        return this.reduce(await this.decode(url), options);
     }
 
-    /** The same reduction, on pixels you decoded yourself. */
+    /**
+     * Fetches a picture and stops there, at full colour. Worth keeping hold of
+     * when the same picture has to be reduced more than once - for another
+     * screen mode, or against a palette that has since changed - since that
+     * saves fetching and decoding it again.
+     */
+    decode(url: string): Promise<RgbaImage> {
+        return this.decoder(url);
+    }
+
+    /**
+     * The same reduction, on pixels already decoded - `image.decode` output, a
+     * canvas's `getImageData`, or something generated. Reducing one picture for
+     * several modes is this call, once each, rather than several loads.
+     */
     reduce(source: RgbaImage, options: ReduceOptions = {}): IndexedImage {
         const mode = this.modeFor(options);
         const { rect, width, height } = fitSize(source, mode, options);
@@ -160,16 +174,20 @@ export class Images {
      * The result covers all 16 registers, with the reserved ones left at what
      * they are now, so loading it disturbs nothing you meant to keep.
      */
-    async palette(source: string | RgbaImage, options: PaletteOptions = {}): Promise<PaletteColor[]> {
-        const rgba = typeof source === "string" ? await this.decoder(source) : source;
+    palette(source: RgbaImage, options: PaletteOptions = {}): PaletteColor[] {
         const mode = this.modeFor(options);
         const reserve = Math.max(0, Math.min(16, options.reserve ?? 0));
         const wanted = Math.min(options.colors ?? mode.colors, 16) - reserve;
 
         const current = this.screen.palette;
-        const chosen = choosePalette(rgba, wanted, options.alphaThreshold ?? 128);
+        const chosen = choosePalette(source, wanted, options.alphaThreshold ?? 128);
         return Array.from({ length: 16 }, (_, i) =>
             i >= reserve && i - reserve < chosen.length ? chosen[i - reserve] : [...current[i]] as PaletteColor);
+    }
+
+    /** The same, for a picture that has still to be fetched. */
+    async loadPalette(url: string, options: PaletteOptions = {}): Promise<PaletteColor[]> {
+        return this.palette(await this.decode(url), options);
     }
 
     /** Queues a loaded picture for the blitter, which lays it down at the chip's pace. */

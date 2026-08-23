@@ -223,36 +223,36 @@ describe("fitting", () => {
 });
 
 describe("generating a palette", () => {
-    it("finds the colours the picture is actually made of", async () => {
+    it("finds the colours the picture is actually made of", () => {
         const { image, screen } = createBios();
         const stripes = source(64, 8, (x) =>
             x < 21 ? [255, 0, 0] : x < 42 ? [0, 255, 0] : [0, 0, 255]);
 
-        const palette = await image.palette(stripes, { colors: 4 });
+        const palette = image.palette(stripes, { colors: 4 });
         screen.setPalette(palette);
         expect(palette.slice(0, 4)).toEqual(
             expect.arrayContaining([[7, 0, 0], [0, 7, 0], [0, 0, 7]])
         );
     });
 
-    it("returns all sixteen entries, leaving the reserved ones as they were", async () => {
+    it("returns all sixteen entries, leaving the reserved ones as they were", () => {
         const { image, screen } = createBios();
         screen.resetPalette();
         screen.setColor(0, 1, 2, 3);
-        const palette = await image.palette(solid(255, 0, 0), { reserve: 1 });
+        const palette = image.palette(solid(255, 0, 0), { reserve: 1 });
         expect(palette).toHaveLength(16);
         expect(palette[0]).toEqual([1, 2, 3]);
         expect(palette[1]).toEqual([7, 0, 0]);
     });
 
-    it("makes a picture land closer once its own palette is loaded", async () => {
+    it("makes a picture land closer once its own palette is loaded", () => {
         const { image, screen } = createBios();
         screen.resetPalette();
         // Sixteen shades of one hue: the boot palette has nothing like it.
         const teal = source(64, 8, (x) => [0, 90 + (x & 15) * 10, 100 + (x & 15) * 9]);
         const before = new Set(image.reduce(teal, { dither: "none" }).pixels).size;
 
-        screen.setPalette(await image.palette(teal));
+        screen.setPalette(image.palette(teal));
         const after = new Set(image.reduce(teal, { dither: "none" }).pixels).size;
         expect(after).toBeGreaterThan(before);
     });

@@ -181,7 +181,7 @@ which is what you want when the picture deserves its own palette:
 screen.setMode("G4");
 
 // A palette chosen for this picture, keeping entry 0 for transparency.
-screen.setPalette(await image.palette("sprites.png", { reserve: 1 }));
+screen.setPalette(await image.loadPalette("sprites.png", { reserve: 1 }));
 
 const art = await image.load("sprites.png", { dither: "ordered", exclude: [0] });
 image.draw(art, 40, 24, { transparent: true });  // queued, like any other drawing
@@ -195,6 +195,11 @@ picks new ones - a 5-bit histogram, median cut for the first guess, then a few
 rounds of k-means to pull each entry onto the middle of what actually chose it.
 It hands back all sixteen entries with the reserved ones untouched, so
 `setPalette` disturbs nothing you meant to keep.
+
+Two of everything, then: `load` and `loadPalette` take a URL and are async,
+`reduce` and `palette` take pixels you already have and are not. `image.decode`
+is the half in between - fetch a picture and stop there, at full colour, which
+is what you want when the same picture has to be reduced more than once.
 
 Three ways to fake the colours a mode does not have:
 
@@ -266,6 +271,39 @@ widening the screen - `screen.pixelAspect` is 0.5 there and 1 everywhere else.
 Hosts scale by the picture's true width, so both modes fill the same space and
 neither comes out stretched; anything doing its own geometry has to divide by
 it, which is why WIRE projects through `1 / screen.pixelAspect`.
+
+### TONE
+
+The picture-loading path, run through every bitmap mode the chip has.
+**Left** and **right** switch between them, and the same source lands in each:
+
+| | | |
+|---|---|---|
+| SCREEN 5 | 256x212, 16 of 512 | the workhorse |
+| SCREEN 6 | 512x212, 4 of 512 | twice the pixels, a quarter of the palette |
+| SCREEN 7 | 512x212, 16 of 512 | both, and half of VRAM gone |
+| SCREEN 8 | 256x212, 256 fixed | no palette at all: GRB 3-3-2 |
+
+Fetched and decoded once. Everything after that is `image.reduce` against the
+palette in the registers, which is why a mode change is a job for one frame
+rather than another round trip. **Up** and **down** change the dither, and
+**Z** switches between a palette chosen for the picture and the sixteen the
+machine boots with - the pair that shows what the palette registers are worth:
+the stock colours have nothing near a dusk sky, and it comes out red.
+
+Two entries are held back for the readout in the sixteen-colour modes, so the
+picture gets fourteen. SCREEN 6 has four colours and cannot spare two, so there
+the readout takes the darkest and brightest of whatever the picture chose.
+
+**X** switches to a colour chart generated in the demo rather than fetched -
+the same reduction, on pixels that never went near a URL. It is the clearest
+look at what each mode can reach: SCREEN 8 holds the hue field nearly whole
+where SCREEN 5 breaks it into sixteen bands.
+
+The picture arrives through the blitter rather than being written, so you watch
+it land at the rate the chip pushes pixels in from outside - about 120 VDP
+cycles a pixel, which is a dozen frames for a SCREEN 5 screenful and nearer
+thirty for SCREEN 7. The bar along the bottom is `gfx.work` draining.
 
 ### HAZE
 

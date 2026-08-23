@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUTTON, FONT, boot, glyphOffset } from "../src/index.js";
+import { BUTTON, FONT, boot, glyphOffset, type Button } from "../src/index.js";
 import { EXAMPLES, findExample } from "../examples/registry.js";
 
 describe("the example registry", () => {
@@ -146,6 +146,96 @@ describe("WIRE's two drawing paths", () => {
         press();
         expect(runtime.gfx.pending).toBe(0);
         expect(runtime.screen.drawPage).not.toBe(runtime.screen.displayPage);
+    });
+});
+
+describe("the TONE demo", () => {
+    async function started() {
+        const { demo } = await import("../examples/tone/demo.js");
+        const runtime = boot();
+        runtime.run(demo);
+        runtime.step(2);
+        return runtime;
+    }
+
+    function press(runtime: Awaited<ReturnType<typeof started>>, button: Button): void {
+        runtime.input.setButton(button, true);
+        runtime.step(1);
+        runtime.input.setButton(button, false);
+        runtime.step(1);
+    }
+
+    /** Runs until the blitter has laid the whole picture down. */
+    function settle(runtime: Awaited<ReturnType<typeof started>>): void {
+        for (let i = 0; i < 400 && runtime.gfx.busy; ++i) runtime.step(1);
+    }
+
+    it("walks the four bitmap modes with left and right, and wraps both ways", async () => {
+        const runtime = await started();
+        expect(runtime.screen.mode.name).toBe("G4");
+
+        for (const name of ["G5", "G6", "G7", "G4"]) {
+            press(runtime, BUTTON.RIGHT);
+            expect(runtime.screen.mode.name).toBe(name);
+        }
+        for (const name of ["G7", "G6", "G5", "G4"]) {
+            press(runtime, BUTTON.LEFT);
+            expect(runtime.screen.mode.name).toBe(name);
+        }
+    });
+
+    it("reduces the generated picture with nothing to fetch, and queues it", async () => {
+        const runtime = await started();
+        press(runtime, BUTTON.B);               // the chart, which needs no decoder
+
+        // A screenful of pixels, handed to the blitter rather than written.
+        expect(runtime.gfx.pending).toBe(1);
+        expect(runtime.gfx.work).toBeGreaterThan(30000);
+
+        settle(runtime);
+        expect(runtime.gfx.busy).toBe(false);
+        // Sixteen colours in play means a reduction happened, not a fill.
+        const used = new Set<number>();
+        for (let x = 0; x < 200; ++x) used.add(runtime.gfx.getPixel(x, 90));
+        expect(used.size).toBeGreaterThan(6);
+    });
+
+    it("abandons a half-drawn picture when the mode changes under it", async () => {
+        const runtime = await started();
+        press(runtime, BUTTON.B);
+        runtime.step(4);
+        const drained = runtime.gfx.work;
+        expect(drained).toBeGreaterThan(0);
+
+        // Out to SCREEN 6 and back: the old job is dropped, not resumed.
+        press(runtime, BUTTON.RIGHT);
+        press(runtime, BUTTON.LEFT);
+        expect(runtime.screen.mode.name).toBe("G4");
+        expect(runtime.gfx.pending).toBe(1);
+        expect(runtime.gfx.work).toBeGreaterThan(drained);
+    });
+
+    it("keeps two palette entries back for the readout where it can afford to", async () => {
+        const runtime = await started();
+        press(runtime, BUTTON.B);
+        expect(runtime.screen.palette[0]).toEqual([0, 0, 0]);
+        expect(runtime.screen.palette[1]).toEqual([7, 7, 7]);
+
+        // SCREEN 6 has four colours and cannot spare two of them.
+        press(runtime, BUTTON.RIGHT);
+        expect(runtime.screen.mode.name).toBe("G5");
+        expect(runtime.screen.palette.slice(0, 4)).not.toContainEqual([7, 7, 7]);
+    });
+
+    it("says so, and still switches modes, when there is no decoder to fetch with", async () => {
+        // Headless is exactly that case: no createImageBitmap to ask.
+        const runtime = await started();
+        await Promise.resolve();
+        runtime.step(2);
+
+        expect(runtime.gfx.pending).toBe(0);        // nothing to draw yet
+        press(runtime, BUTTON.RIGHT);
+        expect(runtime.screen.mode.name).toBe("G5");
     });
 });
 

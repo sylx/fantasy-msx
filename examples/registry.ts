@@ -28,6 +28,13 @@ export const EXAMPLES: readonly Example[] = [
         load: async () => (await import("./wire/demo.js")).demo
     },
     {
+        id: "tone",
+        title: "TONE",
+        summary: "A picture, in every bitmap mode the V9938 has. A photograph is 24 bits a pixel and a V9938 framebuffer is four, two or eight - so the interesting question is not whether a picture survives the trip but which part of it does. Fetched and decoded once; everything after that is a reduction against the palette in the registers.",
+        controls: "left / right for the screen mode · up / down for the dither · Z for the palette · X for the other picture",
+        load: async () => (await import("./tone/demo.js")).demo
+    },
+    {
         id: "haze",
         title: "HAZE",
         summary: "A demo in SCREEN 3, the mode nobody used: 64x48 blocks of 4x4 pixels. The whole picture is 2048 bytes, so every block of it is recomputed every frame, while the palette rotates underneath and R23 scrolls the lot a quarter of a block at a time. The readout is four sprites, which is all a line of SCREEN 3 will show.",
