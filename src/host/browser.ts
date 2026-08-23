@@ -3,7 +3,7 @@
 
 import type { Frame } from "../core/machine.js";
 import { BUTTON, type Button, type Input, type Player } from "../runtime/input.js";
-import { FRAME_RATE, type Host, type Runtime } from "../runtime/runtime.js";
+import { FRAME_RATE, type DroppedFile, type Host, type Runtime } from "../runtime/runtime.js";
 import { WebAudioOutput } from "./audio.js";
 
 const FRAME_SECONDS = 1 / FRAME_RATE;
@@ -21,6 +21,20 @@ export interface BrowserHostOptions {
     gamepads?: boolean;
     /** Open the sound device. On by default. */
     audio?: boolean;
+    /** Accept files dropped on the screen. On by default. */
+    drop?: boolean;
+}
+
+/** Wraps a browser File as the machine sees it. */
+function describe(file: File): DroppedFile {
+    return {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        url: URL.createObjectURL(file),
+        bytes: async () => new Uint8Array(await file.arrayBuffer()),
+        text: () => file.text()
+    };
 }
 
 /** Gamepad button indices, in the standard mapping, for the two triggers. */
@@ -82,6 +96,71 @@ export class BrowserHost implements Host {
             window.removeEventListener("keyup", keyUp);
             window.removeEventListener("blur", blur);
             window.removeEventListener("pointerdown", gesture);
+        });
+
+        if (this.options.drop !== false) this.bindDrop(runtime);
+    }
+
+    /**
+     * Files dropped on the screen.
+     *
+     * The window listeners are there to stop a drop that misses: without them
+     * the browser navigates away to the file, which loses whatever was running.
+     * Only the canvas actually delivers anything, and while something is over
+     * it the canvas carries `data-drop="over"` for a page that wants to say so.
+     */
+    private bindDrop(runtime: Runtime): void {
+        const canvas = this.canvas;
+
+        // Everywhere but the screen: refuse the file, but refuse it ourselves
+        // rather than letting the browser navigate away to it.
+        const swallow = (event: DragEvent) => {
+            if (event.target === canvas) return;
+            if (!event.dataTransfer?.types.includes("Files")) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "none";
+        };
+
+        const over = (event: DragEvent) => {
+            if (!event.dataTransfer?.types.includes("Files")) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+            canvas.dataset.drop = "over";
+        };
+        const leave = () => { delete canvas.dataset.drop; };
+
+        const drop = (event: DragEvent) => {
+            leave();
+            if (!event.dataTransfer?.types.includes("Files")) return;
+            event.preventDefault();
+
+            const dropped = Array.from<File>(event.dataTransfer.files);
+            if (dropped.length === 0) return;
+            // A drop is a gesture, and the browser will let the sound out now.
+            void this.audio?.resume();
+
+            const files = dropped.map(describe);
+            // The object URLs stay readable exactly as long as the app is
+            // using them, and an app that drops the ball must not go unheard.
+            void runtime.drop(files)
+                .catch((error: unknown) => console.error("drop handler failed:", error))
+                .finally(() => {
+                    for (const file of files) URL.revokeObjectURL(file.url);
+                });
+        };
+
+        window.addEventListener("dragover", swallow);
+        window.addEventListener("drop", swallow);
+        canvas.addEventListener("dragover", over);
+        canvas.addEventListener("dragleave", leave);
+        canvas.addEventListener("drop", drop);
+        this.listeners.push(() => {
+            window.removeEventListener("dragover", swallow);
+            window.removeEventListener("drop", swallow);
+            canvas.removeEventListener("dragover", over);
+            canvas.removeEventListener("dragleave", leave);
+            canvas.removeEventListener("drop", drop);
+            leave();
         });
     }
 

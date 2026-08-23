@@ -31,7 +31,7 @@ export const EXAMPLES: readonly Example[] = [
         id: "tone",
         title: "TONE",
         summary: "A picture, in every bitmap mode the V9938 has. A photograph is 24 bits a pixel and a V9938 framebuffer is four, two or eight - so the interesting question is not whether a picture survives the trip but which part of it does. Fetched and decoded once; everything after that is a reduction against the palette in the registers.",
-        controls: "left / right for the screen mode · up / down for the dither · Z for the palette · X for the other picture",
+        controls: "left / right for the screen mode · up / down for the dither · Z for the palette · X for the other picture · drop an image on the screen",
         load: async () => (await import("./tone/demo.js")).demo
     },
     {

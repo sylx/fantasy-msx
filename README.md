@@ -38,7 +38,7 @@ same position an MSX program's VBlank handler occupies.
 
 | Layer | What it is | Status |
 |-------|-----------|--------|
-| host  | canvas blit, keyboard, gamepads, audio, 60Hz clock | done |
+| host  | canvas blit, keyboard, gamepads, audio, file drops, 60Hz clock | done |
 | L0 core | VDP, PSG, OPLL (vendored from WebMSX) | done |
 | L1 API | typed register/VRAM/port access | done |
 | L2 BIOS | drawing and sprites | done |
@@ -219,6 +219,33 @@ In the browser the decoding is the browser's own, so any format it can display
 works, `data:` URLs included. Outside one, hand `image.decoder` something that
 turns a URL into RGBA; `tools/png.ts` exports `nodeDecoder()` for exactly that.
 
+## Files dropped on the screen
+
+The screen is a drop target. A file dropped on it reaches the app as a URL,
+which is the same thing `image.load` takes, so a picture from the desktop takes
+the path a bundled one takes:
+
+```ts
+run({
+    update(ctx) { ... },
+    async drop({ image }, files) {
+        picture = await image.load(files[0].url);
+    }
+}, { canvas });
+```
+
+`files[0]` also carries `name`, `type`, `size`, and `bytes()` / `text()` for
+anything that is not a picture. The URL is an object URL the host owns: it is
+readable until your handler settles, and released the moment it does - which is
+why `drop` may return a promise and why the one above awaits rather than
+leaving the load running.
+
+The host swallows drops that miss the screen too, since the browser's own
+answer to a dropped file is to navigate away from the page and take whatever
+was running with it. While a file is over the screen the canvas carries
+`data-drop="over"`, for a page that wants to say so. Pass `drop: false` to
+`BrowserHost` to have none of it.
+
 
 ## Examples
 
@@ -294,6 +321,9 @@ the stock colours have nothing near a dusk sky, and it comes out red.
 Two entries are held back for the readout in the sixteen-colour modes, so the
 picture gets fourteen. SCREEN 6 has four colours and cannot spare two, so there
 the readout takes the darkest and brightest of whatever the picture chose.
+
+**Drop an image on the screen** and it joins the two the demo ships with: the
+same reduction, on a picture the demo has never seen.
 
 **X** switches to a colour chart generated in the demo rather than fetched -
 the same reduction, on pixels that never went near a URL. It is the clearest

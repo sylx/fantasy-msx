@@ -19,7 +19,7 @@ export { BrowserHost, type BrowserHostOptions } from "./host/browser.js";
 export { HeadlessHost } from "./host/headless.js";
 export { AudioMixer, WebAudioOutput } from "./host/audio.js";
 export * from "./runtime/input.js";
-export { Runtime, FRAME_RATE, type App, type Context, type Host } from "./runtime/runtime.js";
+export { Runtime, FRAME_RATE, type App, type Context, type DroppedFile, type Host } from "./runtime/runtime.js";
 
 export interface BootOptions {
     /** Where to show the picture. Without one the machine runs headless. */

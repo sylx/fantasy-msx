@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BUTTON, boot, HeadlessHost, Input, type App, type Context } from "../src/index.js";
+import { BUTTON, boot, HeadlessHost, Input, type App, type Context, type DroppedFile } from "../src/index.js";
 import { game } from "../examples/ink/game.js";
 
 describe("Runtime", () => {
@@ -62,6 +62,50 @@ describe("Runtime", () => {
 
         runtime.step(5);
         expect(runtime.gfx.busy).toBe(false);
+    });
+});
+
+describe("Dropped files", () => {
+    function file(name: string, contents = "hello"): DroppedFile {
+        return {
+            name,
+            type: "image/png",
+            size: contents.length,
+            url: `blob:${name}`,
+            bytes: async () => new TextEncoder().encode(contents),
+            text: async () => contents
+        };
+    }
+
+    it("hands them to the app and waits for it to finish with them", async () => {
+        let seen: readonly DroppedFile[] = [];
+        let settled = false;
+        const runtime = boot();
+        runtime.run({
+            update: () => {},
+            drop: async (_ctx, files) => {
+                seen = files;
+                await Promise.resolve();
+                settled = true;
+            }
+        });
+
+        await runtime.drop([file("a.png"), file("b.png")]);
+        expect(seen.map((f) => f.name)).toEqual(["a.png", "b.png"]);
+        // Awaited, so a host may release the files as soon as this returns.
+        expect(settled).toBe(true);
+        expect(await seen[0].text()).toBe("hello");
+    });
+
+    it("does nothing for an app that does not want them, or for an empty drop", async () => {
+        const drop = vi.fn();
+        const runtime = boot();
+        runtime.run({ update: () => {} });
+        await expect(runtime.drop([file("a.png")])).resolves.toBeUndefined();
+
+        runtime.run({ update: () => {}, drop });
+        await runtime.drop([]);
+        expect(drop).not.toHaveBeenCalled();
     });
 });
 

@@ -17,6 +17,10 @@
 // `image.reduce`, which is why switching modes is a job for one frame rather
 // than another round trip to the network.
 //
+// Drop an image on the screen and it joins the two that ship with the demo. A
+// dropped file reaches the app as a URL like any other, so the path it takes
+// from there is the same one the bundled picture takes.
+//
 // It arrives through the blitter, so you watch it land at the rate the chip
 // would actually push pixels in from outside: about 120 VDP cycles a pixel,
 // which is a dozen frames for a SCREEN 5 screenful and nearer thirty for
@@ -24,7 +28,7 @@
 
 import {
     BUTTON, compile, opllVoice, paletteRgb, psgVoice,
-    type App, type Context, type Dither, type RgbaImage, type ScreenModeName
+    type App, type Context, type Dither, type DroppedFile, type RgbaImage, type ScreenModeName
 } from "../../src/index.js";
 
 /** Vite rewrites this to the built asset's URL, and serves it as it is in dev. */
@@ -117,6 +121,9 @@ interface Picture {
     /** Full colour, decoded once and kept for every reduction after. */
     pixels: RgbaImage | null;
 }
+
+/** The two that ship with the demo. Anything dropped is added after them. */
+const BUILT_IN = 2;
 
 let pictures: Picture[] = [];
 let picture = 0;
@@ -239,6 +246,15 @@ function readout(ctx: Context, width: number, height: number): void {
         ink, paper);
 }
 
+/** The file's name, upper-cased and short enough to sit in the readout. */
+function label(file: DroppedFile): string {
+    return (file.name.replace(/\.[^.]*$/, "") || "DROPPED").toUpperCase().slice(0, 12);
+}
+
+function message(error: unknown): string {
+    return String(error instanceof Error ? error.message : error).toUpperCase().slice(0, 34);
+}
+
 // --- The app -----------------------------------------------------------------
 
 export const demo: App = {
@@ -257,11 +273,31 @@ export const demo: App = {
         // The one round trip. Everything after it is arithmetic.
         void ctx.image.decode(PHOTO).then(
             (decoded) => { pictures[0].pixels = decoded; dirty = true; },
-            (error) => { failure = String(error?.message ?? error).toUpperCase().slice(0, 34); dirty = true; }
+            (error) => { failure = message(error); dirty = true; }
         );
 
         ctx.bgm.play(SCORE, { loop: true });
         ctx.sprites.setEnabled(false);
+    },
+
+    /**
+     * A picture dropped on the screen. `file.url` is readable only until this
+     * settles, which is why the decode is awaited rather than left running.
+     */
+    async drop(ctx, files) {
+        const image = files.find((file) => file.type.startsWith("image/")) ?? files[0];
+        try {
+            const decoded = await ctx.image.decode(image.url);
+            // One slot for whatever was dropped last, so X still cycles a short list.
+            pictures[BUILT_IN] = { title: label(image), origin: "DROP", pixels: decoded };
+            picture = BUILT_IN;
+            failure = null;
+        } catch (error) {
+            failure = message(error);
+            picture = BUILT_IN;
+            pictures[BUILT_IN] = { title: label(image), origin: "DROP", pixels: null };
+        }
+        dirty = true;
     },
 
     update(ctx) {

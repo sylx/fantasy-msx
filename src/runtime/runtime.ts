@@ -32,6 +32,26 @@ export interface Context {
     readonly time: number;
 }
 
+/**
+ * A file handed to the machine from outside it - dropped on the screen, in the
+ * browser host's case.
+ *
+ * `url` is the cheap way in: it is what `image.load` and anything else taking
+ * a URL wants. It is only valid while the handler is running, though - the
+ * host releases it as soon as the handler settles, so a handler that means to
+ * keep the file must return the promise that reads it.
+ */
+export interface DroppedFile {
+    readonly name: string;
+    /** MIME type as the host reported it. Empty when it could not tell. */
+    readonly type: string;
+    readonly size: number;
+    /** Valid until the drop handler settles. */
+    readonly url: string;
+    bytes(): Promise<Uint8Array>;
+    text(): Promise<string>;
+}
+
 export interface App {
     /** Run once, before the first frame. Set the mode and boot screen here. */
     init?(ctx: Context): void;
@@ -39,6 +59,11 @@ export interface App {
     update(ctx: Context): void;
     /** Queues drawing. What it queues may take several frames to appear. */
     draw?(ctx: Context): void;
+    /**
+     * Files dropped on the screen. Return a promise if the files are read
+     * asynchronously: the host keeps them readable until it settles.
+     */
+    drop?(ctx: Context, files: readonly DroppedFile[]): void | Promise<void>;
 }
 
 /** Where frames go and what drives the clock. */
@@ -114,6 +139,17 @@ export class Runtime implements Context {
 
     get isRunning(): boolean {
         return this.running;
+    }
+
+    /**
+     * Hands the app files from outside the machine. Hosts call this; so can a
+     * test, with files of its own making.
+     *
+     * The returned promise settles when the app has finished with them, which
+     * is a host's cue that it may stop keeping them readable.
+     */
+    async drop(files: readonly DroppedFile[]): Promise<void> {
+        if (files.length > 0) await this.app?.drop?.(this, files);
     }
 
     /**

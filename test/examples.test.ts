@@ -227,6 +227,31 @@ describe("the TONE demo", () => {
         expect(runtime.screen.palette.slice(0, 4)).not.toContainEqual([7, 7, 7]);
     });
 
+    it("shows a picture dropped on the screen", async () => {
+        const runtime = await started();
+        // A red square, standing in for whatever the browser would have decoded.
+        const red = new Uint8ClampedArray(64 * 64 * 4);
+        for (let i = 0; i < 64 * 64; ++i) red.set([255, 0, 0, 255], i * 4);
+        runtime.bios.image.decoder = async () => ({ width: 64, height: 64, data: red });
+
+        await runtime.drop([{
+            name: "sunset.jpg", type: "image/jpeg", size: 16, url: "blob:whatever",
+            bytes: async () => new Uint8Array(), text: async () => ""
+        }]);
+        runtime.step(2);
+        settle(runtime);
+
+        // The palette was chosen for it, around the two entries held back.
+        expect(runtime.screen.palette[2]).toEqual([7, 0, 0]);
+
+        // And it is on screen: a square fitted to the 192 lines above the
+        // readout, centred in the 256 across, with paper either side.
+        const left = (256 - 192) >> 1;
+        expect(runtime.gfx.getPixel(left, 0)).toBe(2);
+        expect(runtime.gfx.getPixel(left + 191, 191)).toBe(2);
+        expect(runtime.gfx.getPixel(left - 1, 96)).toBe(0);
+    });
+
     it("says so, and still switches modes, when there is no decoder to fetch with", async () => {
         // Headless is exactly that case: no createImageBitmap to ask.
         const runtime = await started();
