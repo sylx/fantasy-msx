@@ -8,8 +8,9 @@
 // blitter job pins them to whatever was current when the job was queued, so
 // later page flips cannot make it paint over the wrong page.
 //
-// Coordinates are pixels in the current mode. GRAPHIC4 packs two pixels per
-// byte, the left one in the high nibble, 128 bytes to a line.
+// Coordinates are pixels in the current mode, and the packing follows it: the
+// V9938 puts 4 pixels in a byte in GRAPHIC5, 2 in GRAPHIC4 and GRAPHIC6, and 1
+// in GRAPHIC7 - always with the leftmost pixel in the highest bits.
 
 import type { Vdp } from "../api/index.js";
 import { CHAR_HEIGHT, CHAR_WIDTH, FONT, glyphOffset } from "./font.js";
@@ -57,27 +58,36 @@ export class Raster {
         return this.screen.mode.bytesPerLine;
     }
 
+    /** Pixels packed into one byte: 4 in GRAPHIC5, 2 in GRAPHIC4/6, 1 in GRAPHIC7. */
+    private get pack(): number {
+        return this.screen.mode.pixelsPerByte || 1;
+    }
+
+    /** Every bit of a colour the current mode can actually store. */
+    private get colorMask(): number {
+        return this.screen.mode.colors - 1;
+    }
+
     // --- Primitives -------------------------------------------------------
 
     /** Fills the whole page, ignoring the clip rectangle. */
     clear(color = 0): void {
         const start = this.base;
-        this.vram.fill((color & 0x0f) * 0x11, start, start + this.screen.height * this.stride);
+        this.vram.fill(this.replicate(color), start, start + this.screen.height * this.stride);
     }
 
     pixel(x: number, y: number, color: number): void {
         const c = this.clipRect;
         if (x < c.x || y < c.y || x >= c.x + c.width || y >= c.y + c.height) return;
-        this.writePixel(this.base + y * this.stride + (x >> 1), x, color);
+        this.writePixel(this.base + y * this.stride + ((x / this.pack) | 0), x, color);
     }
 
     getPixel(x: number, y: number, page = this.screen.drawPage): number {
         if (x < 0 || y < 0 || x >= this.screen.width || y >= this.screen.height) return 0;
-        const byte = this.vram[this.screen.pageBase(page) + y * this.stride + (x >> 1)];
-        return x & 1 ? byte & 0x0f : byte >> 4;
+        return this.readPixel(this.screen.pageBase(page) + y * this.stride, x);
     }
 
-    /** Horizontal run. The middle is filled a byte at a time, the ends by nibble. */
+    /** Horizontal run. Whole bytes are filled at once; the ends go pixel by pixel. */
     hline(x: number, y: number, width: number, color: number): void {
         const c = this.clipRect;
         if (y < c.y || y >= c.y + c.height) return;
@@ -87,18 +97,21 @@ export class Raster {
         if (x0 >= x1) return;
 
         const row = this.base + y * this.stride;
-        const nibble = color & 0x0f;
+        const pack = this.pack;
+        const value = color & this.colorMask;
 
-        if (x0 & 1) {                                       // leading half byte
-            this.writePixel(row + (x0 >> 1), x0, nibble);
+        // The ends of the run may share a byte with pixels that must survive,
+        // so they go one at a time and only whole bytes get filled.
+        let end = x1;
+        while (x0 < end && x0 % pack !== 0) {
+            this.writePixel(row + ((x0 / pack) | 0), x0, value);
             ++x0;
         }
-        let end = x1;
-        if (end & 1) {                                      // trailing half byte
+        while (end > x0 && end % pack !== 0) {
             --end;
-            this.writePixel(row + (end >> 1), end, nibble);
+            this.writePixel(row + ((end / pack) | 0), end, value);
         }
-        if (x0 < end) this.vram.fill(nibble * 0x11, row + (x0 >> 1), row + (end >> 1));
+        if (x0 < end) this.vram.fill(this.replicate(value), row + x0 / pack, row + end / pack);
     }
 
     vline(x: number, y: number, height: number, color: number): void {
@@ -107,7 +120,7 @@ export class Raster {
 
         const y0 = Math.max(y, c.y);
         const y1 = Math.min(y + height, c.y + c.height);
-        let address = this.base + y0 * this.stride + (x >> 1);
+        let address = this.base + y0 * this.stride + ((x / this.pack) | 0);
         for (let i = y0; i < y1; ++i, address += this.stride) this.writePixel(address, x, color);
     }
 
@@ -190,11 +203,12 @@ export class Raster {
         if (width <= 0) return;
         const source = sourceBase + sy * this.stride;
 
-        if (!transparent && (sx & 1) === 0 && (dx & 1) === 0 && (width & 1) === 0
+        const pack = this.pack;
+        if (!transparent && sx % pack === 0 && dx % pack === 0 && width % pack === 0
             && dy >= this.clipRect.y && dy < this.clipRect.y + this.clipRect.height
             && dx >= this.clipRect.x && dx + width <= this.clipRect.x + this.clipRect.width) {
-            const dest = this.base + dy * this.stride + (dx >> 1);
-            this.vram.copyWithin(dest, source + (sx >> 1), source + ((sx + width) >> 1));
+            const dest = this.base + dy * this.stride + dx / pack;
+            this.vram.copyWithin(dest, source + sx / pack, source + (sx + width) / pack);
             return;
         }
 
@@ -212,7 +226,7 @@ export class Raster {
     drawImage(x: number, y: number, width: number, height: number, pixels: ArrayLike<number>, transparent = true): void {
         for (let row = 0; row < height; ++row) {
             for (let column = 0; column < width; ++column) {
-                const color = pixels[row * width + column] & 0x0f;
+                const color = pixels[row * width + column] & this.colorMask;
                 if (transparent && color === 0) continue;
                 this.pixel(x + column, y + row, color);
             }
@@ -256,17 +270,34 @@ export class Raster {
         return longest * CHAR_WIDTH;
     }
 
-    // --- Nibble plumbing ---------------------------------------------------
+    // --- Pixel packing -----------------------------------------------------
 
     private writePixel(address: number, x: number, color: number): void {
-        this.vram[address] = x & 1
-            ? (this.vram[address] & 0xf0) | (color & 0x0f)
-            : (this.vram[address] & 0x0f) | ((color & 0x0f) << 4);
+        const pack = this.pack;
+        if (pack === 1) {
+            this.vram[address] = color & 0xff;
+            return;
+        }
+        const bits = 8 / pack;
+        // The leftmost pixel of a byte lives in its highest bits.
+        const shift = (pack - 1 - (x % pack)) * bits;
+        const mask = ((1 << bits) - 1) << shift;
+        this.vram[address] = (this.vram[address] & ~mask) | ((color << shift) & mask);
     }
 
     private readPixel(rowAddress: number, x: number): number {
-        const byte = this.vram[rowAddress + (x >> 1)];
-        return x & 1 ? byte & 0x0f : byte >> 4;
+        const pack = this.pack;
+        const byte = this.vram[rowAddress + ((x / pack) | 0)];
+        if (pack === 1) return byte;
+        const bits = 8 / pack;
+        return (byte >> ((pack - 1 - (x % pack)) * bits)) & ((1 << bits) - 1);
+    }
+
+    /** A byte holding `color` in each of the pixels it packs. */
+    private replicate(color: number): number {
+        let byte = color & this.colorMask;
+        for (let width = 8 / this.pack; width < 8; width <<= 1) byte |= byte << width;
+        return byte & 0xff;
     }
 
     /** Midpoint circle, reporting one octant's worth of offsets mirrored eight ways. */

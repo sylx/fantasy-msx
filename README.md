@@ -43,6 +43,7 @@ same position an MSX program's VBlank handler occupies.
 | L1 API | typed register/VRAM/port access | done |
 | L2 BIOS | drawing and sprites | done |
 | L2 BIOS | music: MML and a frame-driven driver | done |
+| L2 BIOS | images: a URL in, VRAM out, reduced to the mode | done |
 | app | `init` / `update` / `draw` | done |
 
 ### Drawing takes time, and you can see it
@@ -158,6 +159,60 @@ screen.frame();
 
 Sprite colours may be given per line, which is a V9938 feature with no
 equivalent on an MSX1: one sprite, shaded, instead of two stacked.
+
+## Loading a picture
+
+A V9938 has no idea what a PNG is. What it has is a framebuffer of indices -
+four bits of them in SCREEN 5 and 7, two in SCREEN 6, and in SCREEN 8 a byte
+that *is* the colour: three bits of green, three of red, two of blue. So all
+the work between a URL and VRAM is a reduction, and the mode decides how
+severe it is.
+
+```ts
+const { screen, image } = createBios();
+
+await image.show("title.png");                   // fetch, reduce, centre, show
+```
+
+That is the whole of it for a backdrop. The longer form separates the steps,
+which is what you want when the picture deserves its own palette:
+
+```ts
+screen.setMode("G4");
+
+// A palette chosen for this picture, keeping entry 0 for transparency.
+screen.setPalette(await image.palette("sprites.png", { reserve: 1 }));
+
+const art = await image.load("sprites.png", { dither: "ordered", exclude: [0] });
+image.draw(art, 40, 24, { transparent: true });  // queued, like any other drawing
+image.drawNow(art, 40, 24);                      // or straight into VRAM
+```
+
+**The palette is an input, not an output.** Loading a picture never repaints
+the sixteen registers underneath everything already on screen: it reduces to
+the colours the VDP is showing. `image.palette()` is the separate step that
+picks new ones - a 5-bit histogram, median cut for the first guess, then a few
+rounds of k-means to pull each entry onto the middle of what actually chose it.
+It hands back all sixteen entries with the reserved ones untouched, so
+`setPalette` disturbs nothing you meant to keep.
+
+Three ways to fake the colours a mode does not have:
+
+| `dither` | what it looks like |
+|----------|--------------------|
+| `none` | nearest colour, and the banding that comes with it |
+| `ordered` | a 4x4 Bayer crosshatch: fixed, so it holds still when the picture moves |
+| `floyd-steinberg` | error pushed into the neighbours - more detail, and a grain that crawls if the source is animated (the default) |
+
+Sizing follows the mode too. Art that already fits is left at the size it was
+drawn; anything bigger is fitted to the screen, averaging the pixels it drops
+rather than picking one of them. In the 512-wide modes the pixels are half as
+wide as they are tall, and `fit` does that arithmetic for you - a square
+picture comes out square, at twice the pixel count across.
+
+In the browser the decoding is the browser's own, so any format it can display
+works, `data:` URLs included. Outside one, hand `image.decoder` something that
+turns a URL into RGBA; `tools/png.ts` exports `nodeDecoder()` for exactly that.
 
 
 ## Examples

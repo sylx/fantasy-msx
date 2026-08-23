@@ -236,3 +236,52 @@ export const DEFAULT_PALETTE: ReadonlyArray<readonly [number, number, number]> =
 ];
 
 export const VRAM_SIZE = 0x20000;   // 128KB
+
+// --- Colour ---------------------------------------------------------------
+//
+// The V9938 does not spread its 3-bit components evenly across 0..255, and a
+// picture reduced against an even ramp lands slightly off the colours the
+// screen actually shows. These are the chip's own levels.
+
+/** 8-bit values of the 3-bit R, G and B components. */
+export const LEVELS_3BIT: readonly number[] = [0, 36, 73, 109, 146, 182, 219, 255];
+
+/** 8-bit values of GRAPHIC7's 2-bit blue. Not a scaled copy of the 3-bit ramp. */
+export const LEVELS_2BIT: readonly number[] = [0, 73, 146, 255];
+
+/** A palette entry, as the 3-bit components the VDP stores. */
+export type PaletteColor = readonly [number, number, number];
+
+/** What a palette entry looks like on screen. */
+export function paletteRgb(color: PaletteColor): [number, number, number] {
+    return [LEVELS_3BIT[color[0] & 7], LEVELS_3BIT[color[1] & 7], LEVELS_3BIT[color[2] & 7]];
+}
+
+/**
+ * GRAPHIC7 has no palette: the byte in VRAM is the colour, three bits of
+ * green, three of red and two of blue.
+ */
+export function color256Rgb(byte: number): [number, number, number] {
+    return [LEVELS_3BIT[(byte >> 2) & 7], LEVELS_3BIT[(byte >> 5) & 7], LEVELS_2BIT[byte & 3]];
+}
+
+/** The GRAPHIC7 byte closest to an 8-bit RGB colour. */
+export function rgbToColor256(r: number, g: number, b: number): number {
+    return (nearestLevel(LEVELS_3BIT, g) << 5) | (nearestLevel(LEVELS_3BIT, r) << 2) | nearestLevel(LEVELS_2BIT, b);
+}
+
+/** The 3-bit palette components closest to an 8-bit RGB colour. */
+export function rgbToPalette(r: number, g: number, b: number): PaletteColor {
+    return [nearestLevel(LEVELS_3BIT, r), nearestLevel(LEVELS_3BIT, g), nearestLevel(LEVELS_3BIT, b)];
+}
+
+/** Index of the entry in `levels` nearest `value`. The ramps are short; a scan is enough. */
+function nearestLevel(levels: readonly number[], value: number): number {
+    let best = 0;
+    let distance = Infinity;
+    for (let i = 0; i < levels.length; ++i) {
+        const d = Math.abs(levels[i] - value);
+        if (d < distance) { distance = d; best = i; }
+    }
+    return best;
+}

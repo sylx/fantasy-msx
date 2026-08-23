@@ -3,6 +3,7 @@
 import { createSystem, type System } from "../api/index.js";
 import { Blitter } from "./blitter.js";
 import { Graphics } from "./gfx.js";
+import { Images } from "./image.js";
 import { Raster } from "./raster.js";
 import { Screen } from "./screen.js";
 import { SoundDriver } from "./sound.js";
@@ -10,6 +11,11 @@ import { Sprites } from "./sprites.js";
 
 export { Blitter, COST, type Job } from "./blitter.js";
 export { Graphics } from "./gfx.js";
+export {
+    Images,
+    type Dither, type DrawOptions, type Fit, type ImageDecoder, type IndexedImage,
+    type PaletteOptions, type ReduceOptions, type RgbaImage
+} from "./image.js";
 export { Raster, type BlitOptions, type Rect } from "./raster.js";
 export { Screen, type SpriteTables } from "./screen.js";
 export { Sprites, SPRITE_COUNT, SPRITE_FLAGS, type SpriteState } from "./sprites.js";
@@ -27,6 +33,8 @@ export interface Bios {
     /** Drawing. Queued, and paced by the hardware. */
     readonly gfx: Graphics;
     readonly sprites: Sprites;
+    /** Pictures from outside the machine, reduced to what the mode can show. */
+    readonly image: Images;
     /** The queue behind `gfx`. Advanced automatically as the machine runs. */
     readonly blitter: Blitter;
     /** Music and effects, stepped once per frame on the vertical interrupt. */
@@ -43,11 +51,13 @@ export function createBios(system: System = createSystem()): Bios {
     // as long as the machine is running, whether or not anyone asks it to.
     system.machine.onCycles = (cycles) => blitter.step(cycles);
 
+    const gfx = new Graphics(screen, blitter, new Raster(system.vdp, screen));
     const bios: Bios = {
         system,
         screen,
-        gfx: new Graphics(screen, blitter, new Raster(system.vdp, screen)),
+        gfx,
         sprites: new Sprites(system.vdp, screen),
+        image: new Images(screen, gfx),
         blitter,
         bgm: new SoundDriver(system.psg, system.opll)
     };

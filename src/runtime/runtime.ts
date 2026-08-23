@@ -11,7 +11,7 @@
 // the VDP composites every scanline for nothing.
 
 import type { Bios } from "../bios/index.js";
-import type { Graphics, Screen, SoundDriver, Sprites } from "../bios/index.js";
+import type { Graphics, Images, Screen, SoundDriver, Sprites } from "../bios/index.js";
 import type { Frame } from "../core/machine.js";
 import { Input } from "./input.js";
 
@@ -21,6 +21,8 @@ export interface Context {
     readonly screen: Screen;
     readonly gfx: Graphics;
     readonly sprites: Sprites;
+    /** Loading pictures from URLs, reduced to what the screen mode can show. */
+    readonly image: Images;
     /** Music and effects. Already ticking on the vertical interrupt. */
     readonly bgm: SoundDriver;
     readonly input: Input;
@@ -79,6 +81,10 @@ export class Runtime implements Context {
 
     get sprites(): Sprites {
         return this.bios.sprites;
+    }
+
+    get image(): Images {
+        return this.bios.image;
     }
 
     get bgm(): SoundDriver {

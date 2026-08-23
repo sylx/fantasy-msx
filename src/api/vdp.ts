@@ -10,7 +10,7 @@
 import type { VDP as VdpPorts } from "../core/types.js";
 import {
     ARG, CMD, DEFAULT_PALETTE, MODES, OP, R, R0, R1, R8, R9, S, S2,
-    type ScreenMode, type ScreenModeName
+    type PaletteColor, type ScreenMode, type ScreenModeName
 } from "./v9938.js";
 
 /** Where a mode's tables live inside VRAM. Addresses are absolute. */
@@ -43,6 +43,8 @@ export class Vdp {
 
     /** Shadow of the control registers, which are write-only on real hardware. */
     private readonly regs = new Uint8Array(47);
+    /** Shadow of the 16 palette registers, which are write-only too. */
+    private readonly colors: Array<[number, number, number]> = DEFAULT_PALETTE.map((c) => [...c]);
     private currentMode: ScreenMode = MODES.G1;
     private currentPage = 0;
     private layout: TableLayout = defaultBitmapLayout(0);
@@ -221,8 +223,18 @@ export class Vdp {
 
     // --- Palette ---------------------------------------------------------
 
+    /**
+     * The 16 palette entries as they were last written. The registers are
+     * write-only on the chip, so this shadow is the only way to ask what
+     * colours are on screen - which is what reducing a picture to them needs.
+     */
+    get palette(): ReadonlyArray<PaletteColor> {
+        return this.colors;
+    }
+
     /** Each component is 3 bits (0-7), giving the V9938's 512-colour space. */
     setPaletteEntry(index: number, r: number, g: number, b: number): void {
+        this.colors[index & 0x0f] = [r & 0x07, g & 0x07, b & 0x07];
         this.write(R.PALETTE_INDEX, index & 0x0f);
         this.ports.output9a(((r & 0x07) << 4) | (b & 0x07));
         this.ports.output9a(g & 0x07);
@@ -271,6 +283,8 @@ export class Vdp {
     reset(): void {
         this.ports.reset();
         this.regs.fill(0);
+        // The chip reloads its boot palette on reset; keep the shadow in step.
+        for (let i = 0; i < 16; ++i) this.colors[i] = [...DEFAULT_PALETTE[i]];
         this.currentMode = MODES.G1;
         this.currentPage = 0;
     }

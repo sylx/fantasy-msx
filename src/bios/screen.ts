@@ -4,7 +4,7 @@
 // uses 0x6A00. The spare 0x1600 at the top of page 0 holds the sprite tables,
 // which stay put while the framebuffer pages flip beneath them.
 
-import { type ScreenModeName, type Vdp } from "../api/index.js";
+import { type PaletteColor, type ScreenModeName, type Vdp } from "../api/index.js";
 import type { FantasyMachine } from "../core/machine.js";
 
 /**
@@ -129,6 +129,15 @@ export class Screen {
 
     setBackdrop(color: number): void {
         this.vdp.setBackdrop(color);
+    }
+
+    /**
+     * The sixteen palette entries as they stand, in 3-bit components. The
+     * registers are write-only on the chip, so this is a shadow of what was
+     * written - which is what reducing a picture to them needs to know.
+     */
+    get palette(): ReadonlyArray<PaletteColor> {
+        return this.vdp.palette;
     }
 
     /** Palette entry as 3-bit components, giving the V9938's 512 colours. */

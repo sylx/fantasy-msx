@@ -64,12 +64,14 @@ export class FillJob extends BaseJob {
         base: number, clip: Rect,
         private readonly x: number, private readonly y: number,
         private readonly width: number, private readonly height: number,
-        private readonly color: number
+        private readonly color: number,
+        pack = 2
     ) {
         super(base, clip);
         this.total = Math.max(0, width) * Math.max(0, height);
-        // Even edges let the chip move whole bytes and skip the read-modify-write.
-        const aligned = (x & 1) === 0 && (width & 1) === 0;
+        // Edges on a byte boundary let the chip move whole bytes and skip the
+        // read-modify-write. Where that boundary falls depends on the mode.
+        const aligned = x % pack === 0 && width % pack === 0;
         this.cyclesPerUnit = aligned ? COST.FILL_ALIGNED : COST.FILL;
     }
 
@@ -102,11 +104,12 @@ export class CopyJob extends BaseJob {
         private readonly sx: number, private readonly sy: number,
         private readonly dx: number, private readonly dy: number,
         private readonly width: number, private readonly height: number,
-        private readonly transparent: boolean
+        private readonly transparent: boolean,
+        pack = 2
     ) {
         super(base, clip);
         this.total = Math.max(0, width) * Math.max(0, height);
-        const aligned = !transparent && (sx & 1) === 0 && (dx & 1) === 0 && (width & 1) === 0;
+        const aligned = !transparent && sx % pack === 0 && dx % pack === 0 && width % pack === 0;
         this.cyclesPerUnit = aligned ? COST.COPY_ALIGNED : COST.COPY;
     }
 
@@ -218,7 +221,9 @@ export class TransferJob extends BaseJob {
     advance(raster: Raster, units: number): void {
         const end = this.cursor + Math.min(units, this.remaining);
         for (; this.cursor < end; ++this.cursor) {
-            const color = this.pixels[this.cursor] & 0x0f;
+            // Left as the caller gave it: the rasteriser knows how many bits
+            // of a colour the current mode keeps, and this does not.
+            const color = this.pixels[this.cursor];
             if (this.transparent && color === 0) continue;
             const row = (this.cursor / this.width) | 0;
             raster.pixel(this.x + this.cursor - row * this.width, this.y + row, color);

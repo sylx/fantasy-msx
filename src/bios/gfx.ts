@@ -97,7 +97,7 @@ export class Graphics {
 
     clear(color = 0): void {
         this.blitter.push(new FillJob(
-            this.pageBase(), this.fullPage(), 0, 0, this.screen.width, this.screen.height, color
+            this.pageBase(), this.fullPage(), 0, 0, this.screen.width, this.screen.height, color, this.pack
         ));
     }
 
@@ -123,7 +123,7 @@ export class Graphics {
      * which is eight times faster - worth arranging when you can.
      */
     fillRect(x: number, y: number, width: number, height: number, color: number): void {
-        this.blitter.push(new FillJob(this.pageBase(), this.capture(), x, y, width, height, color));
+        this.blitter.push(new FillJob(this.pageBase(), this.capture(), x, y, width, height, color, this.pack));
     }
 
     rect(x: number, y: number, width: number, height: number, color: number): void {
@@ -160,7 +160,7 @@ export class Graphics {
         const clip = this.capture();
         for (const y of [...spans.keys()].sort((a, b) => a - b)) {
             const dx = spans.get(y)!;
-            this.blitter.push(new FillJob(base, clip, cx - dx, y, dx * 2 + 1, 1, color));
+            this.blitter.push(new FillJob(base, clip, cx - dx, y, dx * 2 + 1, 1, color, this.pack));
         }
     }
 
@@ -172,7 +172,7 @@ export class Graphics {
     blit(sx: number, sy: number, dx: number, dy: number, width: number, height: number, options: BlitOptions = {}): void {
         const source = this.screen.pageBase(options.fromPage ?? this.screen.drawPage);
         this.blitter.push(new CopyJob(
-            this.pageBase(), this.capture(), source, sx, sy, dx, dy, width, height, !!options.transparent
+            this.pageBase(), this.capture(), source, sx, sy, dx, dy, width, height, !!options.transparent, this.pack
         ));
     }
 
@@ -214,6 +214,11 @@ export class Graphics {
 
     private pageBase(): number {
         return this.screen.pageBase(this.screen.drawPage);
+    }
+
+    /** Pixels to a byte in the current mode, which is what byte alignment means. */
+    private get pack(): number {
+        return this.screen.mode.pixelsPerByte || 1;
     }
 
     /** Snapshots the clip so a job is unaffected by later changes. */
