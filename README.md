@@ -44,6 +44,7 @@ same position an MSX program's VBlank handler occupies.
 | L2 BIOS | drawing and sprites | done |
 | L2 BIOS | music: MML and a frame-driven driver | done |
 | L2 BIOS | images: a URL in, VRAM out, reduced to the mode | done |
+| L2 BIOS | text: the host's fonts, rasterised outside and carried in | done |
 | app | `init` / `update` / `draw` | done |
 
 ### Drawing takes time, and you can see it
@@ -219,6 +220,73 @@ In the browser the decoding is the browser's own, so any format it can display
 works, `data:` URLs included. Outside one, hand `image.decoder` something that
 turns a URL into RGBA; `tools/png.ts` exports `nodeDecoder()` for exactly that.
 
+## Text in a real typeface
+
+`gfx.text` draws the machine's own 6x8 font - five pixels wide, seven rows, the
+shapes an MSX had in ROM. `text` is the other kind: a real typeface, laid out
+and rasterised by the browser on a canvas the machine never sees, then carried
+into VRAM one byte per pixel like any other picture.
+
+```ts
+const { text, gfx } = createBios();
+
+text.style = { font: "'Georgia', serif", size: 20 };   // chosen once
+
+text.drawNow(12, 12, "CHAPTER ONE", { color: 15 });    // straight into VRAM
+text.draw(12, 40, "and what\nbecame of it", {          // queued, like any drawing
+    color: 10, align: "center", lineHeight: 22
+});
+
+const box = text.measure("CHAPTER ONE");               // width, height, baseline, lines
+```
+
+A face the page does not already have is fetched first, and one still loading
+rasterises as the fallback - silently, and at the fallback's metrics - so an
+`await` in `init` is worth it:
+
+```ts
+await text.load("Press Start 2P", "fonts/press-start.woff2");
+text.style = { font: "'Press Start 2P', monospace", size: 8 };
+await text.ready();                                    // faces named in CSS, too
+```
+
+What crosses the boundary is **coverage**: how much of each pixel the glyphs
+cover, 0 to 255. The machine has no such quantity - a pixel is an index into
+sixteen registers and nothing in between - so the coverage has to be spent on
+indices that already exist, and `shades` is where you say which:
+
+```ts
+screen.setColor(8, 3, 3, 3);                           // a grey between the two
+
+text.drawNow(12, 12, "CHAPTER ONE", { shades: [8, 15] });   // one soft step
+text.drawNow(12, 40, "and what became of it", { color: 15 });  // a hard edge
+```
+
+The ramp runs palest to fullest, and the coverage is divided into as many bands
+as it is long plus one: the bottom band is the background and the rest take the
+ramp in order. A ramp of one is exactly a threshold - which is what `color` is -
+so the antialiased path and the hard-edged one are the same arithmetic, and
+`threshold` (128 by default) slides a ramp of any length towards the ink or
+away from it. Lower it to fatten every stroke; raise it to thin them.
+
+**The palette is an input, as it is for pictures.** Nothing here picks a
+colour, searches for a near one, or repaints a register: every entry of the
+ramp is one you set, and one the type has taken off whatever else is on screen.
+Three shades is usually the most a sixteen-colour mode can afford, and small
+text should stay at one - at ten pixels an em there is no flank to resolve,
+only a blur where the stem was. `background` is the index behind the glyphs,
+and leaving it out makes the box transparent so only the glyphs land.
+
+Rendering is the expensive half, so the last hundred or so results are kept:
+a caption redrawn every frame costs one layout and then nothing. `text.forget()`
+drops them, which is what a late-arriving font needs (`load` and `ready` do it
+for you).
+
+In the browser the layout is the browser's own, so any font the page can see
+works. Outside one there is nothing to ask, and `text.rasteriser` is the seam:
+give it a function from a string to coverage and everything above it works
+unchanged.
+
 ## Files dropped on the screen
 
 The screen is a drop target. A file dropped on it reaches the app as a URL,
@@ -334,6 +402,33 @@ The picture arrives through the blitter rather than being written, so you watch
 it land at the rate the chip pushes pixels in from outside - about 120 VDP
 cycles a pixel, which is a dozen frames for a SCREEN 5 screenful and nearer
 thirty for SCREEN 7. The bar along the bottom is `gfx.work` draining.
+
+### TYPE
+
+A specimen sheet, set in the host's fonts. The machine's own font is five
+pixels wide inside an 8x8 cell and stops at ASCII 126; this sets the same words
+in the browser's, rasterised outside the machine and carried in a byte a pixel.
+The strip near the bottom is the ROM font saying the same thing - and on the
+Japanese specimen it says `??????????`, because those glyphs were never in it.
+
+**Up** and **down** walk the ramp, which is the knob worth playing with: a
+solid edge, then two, three and four shades. What arrives from the host is
+coverage - how much of each pixel the glyphs cover - and the machine has no
+such quantity, so it is spent on palette entries the demo set aside for it. The
+swatches in the readout are those registers, which is the honest way to price
+the smoothing: it comes out of the sixteen colours everything else on screen is
+drawing from. A specimen sheet can afford three; a game with artwork usually
+cannot.
+
+**Left** and **right** change the face, **Z** the weight and italic, **X** the
+specimen. The faces are the CSS generic families rather than anything fetched,
+so whatever the machine running the page calls its serif is what gets set.
+
+Both sizes on the sheet are fitted to the measure with `text.measure` before
+anything is drawn, and the body is wrapped on the same measurements the
+rasteriser will use. The display line is queued rather than written, so you
+watch it lay down; everything under it is `drawNow`, since a specimen sheet
+that arrived in instalments would be unreadable while it did.
 
 ### HAZE
 

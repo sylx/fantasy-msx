@@ -8,6 +8,7 @@ import { Raster } from "./raster.js";
 import { Screen } from "./screen.js";
 import { SoundDriver } from "./sound.js";
 import { Sprites } from "./sprites.js";
+import { Typesetter } from "./text.js";
 
 export { Blitter, COST, type Job } from "./blitter.js";
 export { Graphics } from "./gfx.js";
@@ -17,6 +18,11 @@ export {
     type PaletteOptions, type ReduceOptions, type RgbaImage
 } from "./image.js";
 export { Raster, type BlitOptions, type Rect } from "./raster.js";
+export {
+    Typesetter, rasteriseWithCanvas,
+    type Coverage, type ResolvedStyle, type TextAlign, type TextBox,
+    type TextImage, type TextRasteriser, type TextStyle
+} from "./text.js";
 export { Screen, type SpriteTables } from "./screen.js";
 export { Sprites, SPRITE_COUNT, SPRITE_FLAGS, type SpriteState } from "./sprites.js";
 export { CHAR_HEIGHT, CHAR_WIDTH, FONT, glyphOffset } from "./font.js";
@@ -35,6 +41,8 @@ export interface Bios {
     readonly sprites: Sprites;
     /** Pictures from outside the machine, reduced to what the mode can show. */
     readonly image: Images;
+    /** Text in the host's own fonts, rasterised outside the machine and carried in. */
+    readonly text: Typesetter;
     /** The queue behind `gfx`. Advanced automatically as the machine runs. */
     readonly blitter: Blitter;
     /** Music and effects, stepped once per frame on the vertical interrupt. */
@@ -58,6 +66,7 @@ export function createBios(system: System = createSystem()): Bios {
         gfx,
         sprites: new Sprites(system.vdp, screen),
         image: new Images(screen, gfx),
+        text: new Typesetter(gfx),
         blitter,
         bgm: new SoundDriver(system.psg, system.opll)
     };

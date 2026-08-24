@@ -35,6 +35,13 @@ export const EXAMPLES: readonly Example[] = [
         load: async () => (await import("./tone/demo.js")).demo
     },
     {
+        id: "type",
+        title: "TYPE",
+        summary: "A specimen sheet. The machine's own font is five pixels wide and stops at ASCII 126; this sets the same words in the browser's fonts instead, rasterised outside the machine and carried in a byte a pixel. What arrives is coverage, and it is spent on a ramp of palette entries - the swatches in the readout are the registers the smoothing costs.",
+        controls: "left / right for the face \u00b7 up / down for the ramp \u00b7 Z for weight and italic \u00b7 X for the specimen",
+        load: async () => (await import("./type/demo.js")).demo
+    },
+    {
         id: "haze",
         title: "HAZE",
         summary: "A demo in SCREEN 3, the mode nobody used: 64x48 blocks of 4x4 pixels. The whole picture is 2048 bytes, so every block of it is recomputed every frame, while the palette rotates underneath and R23 scrolls the lot a quarter of a block at a time. The readout is four sprites, which is all a line of SCREEN 3 will show.",

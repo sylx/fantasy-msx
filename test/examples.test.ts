@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUTTON, FONT, boot, glyphOffset, type Button } from "../src/index.js";
+import { BUTTON, FONT, boot, glyphOffset, type Button, type TextRasteriser } from "../src/index.js";
 import { EXAMPLES, findExample } from "../examples/registry.js";
 
 describe("the example registry", () => {
@@ -261,6 +261,136 @@ describe("the TONE demo", () => {
         expect(runtime.gfx.pending).toBe(0);        // nothing to draw yet
         press(runtime, BUTTON.RIGHT);
         expect(runtime.screen.mode.name).toBe("G5");
+    });
+});
+
+describe("the TYPE demo", () => {
+    /**
+     * A rasteriser standing in for the browser's: a monospaced face half as
+     * wide as it is tall, whose coverage ramps across every 16 columns so that
+     * moving the threshold moves a predictable amount of ink.
+     */
+    const stub: TextRasteriser = (text, style) => {
+        const lines = text.split("\n");
+        const longest = Math.max(...lines.map((line) => line.length));
+        const width = Math.max(1, Math.round(longest * style.size * 0.5));
+        const lineHeight = Math.round(style.lineHeight ?? style.size * 1.2);
+        const height = Math.max(1, lineHeight * lines.length);
+
+        const alpha = new Uint8Array(width * height);
+        for (let y = 0; y < height; ++y) {
+            for (let x = 0; x < width; ++x) alpha[y * width + x] = (x % 16) * 17;
+        }
+        return { width, height, alpha, baseline: Math.round(style.size * 0.8), lineHeight };
+    };
+
+    async function started(rasteriser: TextRasteriser | null = stub) {
+        const { demo } = await import("../examples/type/demo.js");
+        const runtime = boot();
+        if (rasteriser) runtime.bios.text.rasteriser = rasteriser;
+        runtime.run(demo);
+        runtime.step(2);
+        return runtime;
+    }
+
+    function press(runtime: Awaited<ReturnType<typeof started>>, button: Button): void {
+        runtime.input.setButton(button, true);
+        runtime.step(1);
+        runtime.input.setButton(button, false);
+        runtime.step(1);
+    }
+
+    /** How much of the sheet came out as ink, above the readout. */
+    function ink(runtime: Awaited<ReturnType<typeof started>>): number {
+        for (let i = 0; i < 100 && runtime.gfx.busy; ++i) runtime.step(1);
+        let count = 0;
+        for (let y = 0; y < 212 - 18; ++y) {
+            for (let x = 0; x < 256; x += 2) if (runtime.gfx.getPixel(x, y) === 1) ++count;
+        }
+        return count;
+    }
+
+    it("sets the sheet on paper of its own, and queues the display line", async () => {
+        const runtime = await started();
+
+        expect(runtime.screen.mode.name).toBe("G4");
+        expect(runtime.screen.palette[0]).toEqual([7, 7, 5]);   // paper
+        expect(runtime.screen.palette[1]).toEqual([0, 0, 1]);   // ink
+
+        // The headline goes through the blitter; everything under it is written.
+        expect(runtime.gfx.pending).toBe(1);
+        expect(runtime.gfx.work).toBeGreaterThan(1000);
+        expect(ink(runtime)).toBeGreaterThan(500);
+    });
+
+    /** How many of the sheet's pixels landed on each index, above the readout. */
+    function counts(runtime: Awaited<ReturnType<typeof started>>): Map<number, number> {
+        for (let i = 0; i < 100 && runtime.gfx.busy; ++i) runtime.step(1);
+        const found = new Map<number, number>();
+        for (let y = 0; y < 212 - 18; ++y) {
+            for (let x = 0; x < 256; ++x) {
+                const index = runtime.gfx.getPixel(x, y);
+                found.set(index, (found.get(index) ?? 0) + 1);
+            }
+        }
+        return found;
+    }
+
+    it("spends the coverage on the ramp, and only on the entries the ramp names", async () => {
+        const runtime = await started();
+        // Three shades to start with: the two greys and the ink itself.
+        const shaded = counts(runtime);
+        for (const index of [4, 5, 1]) expect(shaded.get(index) ?? 0).toBeGreaterThan(20);
+        expect(shaded.get(6) ?? 0).toBe(0);             // the fourth grey is not in this ramp
+
+        // Down to a solid edge, and the greys go with it.
+        press(runtime, BUTTON.UP);
+        press(runtime, BUTTON.UP);
+        const solid = counts(runtime);
+        expect(solid.get(1) ?? 0).toBeGreaterThan(20);
+        for (const index of [4, 5, 6]) expect(solid.get(index) ?? 0).toBe(0);
+
+        // And on to the longest ramp, which reaches the fourth grey.
+        press(runtime, BUTTON.DOWN);
+        press(runtime, BUTTON.DOWN);
+        press(runtime, BUTTON.DOWN);
+        expect(counts(runtime).get(6) ?? 0).toBeGreaterThan(20);
+    });
+
+    it("wraps at both ends of the list of ramps", async () => {
+        const runtime = await started();
+        const solid = () => (counts(runtime).get(5) ?? 0) === 0;
+
+        press(runtime, BUTTON.UP);
+        press(runtime, BUTTON.UP);
+        expect(solid()).toBe(true);
+        press(runtime, BUTTON.UP);                      // past the top, round to the longest
+        expect(solid()).toBe(false);
+        press(runtime, BUTTON.DOWN);                    // and back again
+        expect(solid()).toBe(true);
+    });
+
+    it("resets the sheet for each face, weight and specimen", async () => {
+        const runtime = await started();
+        const sizes = new Set<number>();
+
+        for (const button of [BUTTON.RIGHT, BUTTON.A, BUTTON.B]) {
+            press(runtime, button);
+            // Each change abandons what was queued and starts the sheet again.
+            expect(runtime.gfx.pending).toBe(1);
+            sizes.add(runtime.gfx.work);
+            expect(ink(runtime)).toBeGreaterThan(0);
+        }
+        // The specimens are different lengths, so the display line is too.
+        expect(sizes.size).toBeGreaterThan(1);
+    });
+
+    it("says so and falls back to the ROM font where there is no text engine", async () => {
+        const runtime = await started(null);       // headless: nothing to ask for a face
+
+        expect(runtime.gfx.pending).toBe(0);       // no display line to queue
+        // The apology is set in the machine's own font, so there is still ink.
+        expect(ink(runtime)).toBeGreaterThan(50);
     });
 });
 
