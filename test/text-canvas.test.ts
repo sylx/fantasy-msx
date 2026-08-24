@@ -43,12 +43,21 @@ class FakeContext {
         };
     }
 
+    /** Horizontal scale, as `setTransform` last left it. */
+    scale = 1;
+
+    setTransform(a: number): void {
+        this.scale = a;
+    }
+
     fillText(text: string, x: number, y: number): void {
         this.stamps.push({ text, x, y });
         const top = Math.round(y - this.size * ASCENT);
         const bottom = Math.round(y + this.size * DESCENT);
+        const from = Math.round(x * this.scale);
+        const to = Math.round((x + this.advance(text)) * this.scale);
         for (let row = Math.max(0, top); row < Math.min(this.canvas.height, bottom); ++row) {
-            for (let column = Math.round(x); column < Math.min(this.canvas.width, Math.round(x + this.advance(text))); ++column) {
+            for (let column = Math.max(0, from); column < Math.min(this.canvas.width, to); ++column) {
                 this.canvas.alpha[row * this.canvas.width + column] = 255;
             }
         }
@@ -70,8 +79,13 @@ class FakeCanvas {
     get width(): number { return this.w; }
     get height(): number { return this.h; }
     // Resizing clears the bitmap, exactly as a real canvas does.
-    set width(value: number) { this.w = value; this.alpha = new Uint8Array(this.w * this.h); }
-    set height(value: number) { this.h = value; this.alpha = new Uint8Array(this.w * this.h); }
+    set width(value: number) { this.w = value; this.reset(); }
+    set height(value: number) { this.h = value; this.reset(); }
+
+    private reset(): void {
+        this.alpha = new Uint8Array(this.w * this.h);
+        this.context.scale = 1;                     // a resize clears the transform too
+    }
 
     getContext(): FakeContext { return this.context; }
 }
@@ -93,7 +107,7 @@ function stamps(): Stamp[] {
 }
 
 const style = (extra: Partial<ResolvedStyle> = {}): ResolvedStyle =>
-    ({ font: "10px sans-serif", size: 10, letterSpacing: 0, align: "left", ...extra });
+    ({ font: "10px sans-serif", size: 10, letterSpacing: 0, align: "left", stretch: 1, ...extra });
 
 beforeEach(() => { stamps().length = 0; });
 
@@ -130,6 +144,27 @@ describe("The browser rasteriser", () => {
 
         stamps().length = 0;
         rasteriseWithCanvas("ab\nabcd", style({ align: "right" }));
+        expect(stamps().map((s) => s.x)).toEqual([10, 0]);
+    });
+
+    it("draws the em twice as wide where the mode's pixels are tall", () => {
+        const square = rasteriseWithCanvas("abcd", style());
+        const tall = rasteriseWithCanvas("abcd", style({ stretch: 2 }));
+
+        // Twice across, the same down: type of the same shape, at twice the
+        // horizontal detail - which is what SCREEN 7 is for.
+        expect(tall.width).toBe(square.width * 2);
+        expect(tall.height).toBe(square.height);
+        expect(tall.baseline).toBe(square.baseline);
+        // The origin is passed in the font's own pixels, and the scale widens it.
+        expect(stamps().at(-1)!.x).toBe(0);
+        expect(tall.alpha[tall.width - 1]).toBe(255);
+    });
+
+    it("aligns against the stretched box, not the font's own measure", () => {
+        rasteriseWithCanvas("ab\nabcd", style({ stretch: 2, align: "right" }));
+        // Ten font pixels of slack, which the scale makes twenty on the page -
+        // and the origin goes back through it as ten.
         expect(stamps().map((s) => s.x)).toEqual([10, 0]);
     });
 

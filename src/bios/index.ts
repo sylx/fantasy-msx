@@ -66,7 +66,7 @@ export function createBios(system: System = createSystem()): Bios {
         gfx,
         sprites: new Sprites(system.vdp, screen),
         image: new Images(screen, gfx),
-        text: new Typesetter(gfx),
+        text: new Typesetter(gfx, screen),
         blitter,
         bgm: new SoundDriver(system.psg, system.opll)
     };

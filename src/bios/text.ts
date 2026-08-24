@@ -19,6 +19,7 @@
 // app's decision, and a ramp is how that decision gets said.
 
 import type { Graphics } from "./gfx.js";
+import type { Screen } from "./screen.js";
 
 /** Where a short line sits inside a box the widest one decided. */
 export type TextAlign = "left" | "center" | "right";
@@ -68,6 +69,18 @@ export interface TextStyle {
      * higher thins it.
      */
     threshold?: number;
+    /**
+     * How many pixels wide one pixel of the em is drawn, which is how type
+     * keeps its proportions in the 512-wide modes: their pixels are half as
+     * wide as they are tall, so a line set the same way as in SCREEN 5 would
+     * come out condensed to half its width.
+     *
+     * Defaults to whatever the mode needs - 1 in SCREEN 5 and 8, 2 in SCREEN 6
+     * and 7 - so the same style set in either gives type of the same shape,
+     * with twice the detail across it in the 512-wide ones. Pass 1 to work in
+     * the mode's own pixels instead, and anything else to condense or extend.
+     */
+    stretch?: number;
 }
 
 /** A style with every question answered, which is what the rasteriser is handed. */
@@ -79,6 +92,8 @@ export interface ResolvedStyle {
     readonly lineHeight?: number;
     readonly letterSpacing: number;
     readonly align: TextAlign;
+    /** Horizontal scale, for the modes whose pixels are not square. */
+    readonly stretch: number;
 }
 
 /** What the host hands back: coverage per pixel, and where the type sits in it. */
@@ -133,7 +148,7 @@ export class Typesetter {
 
     private readonly cache = new Map<string, TextImage>();
 
-    constructor(private readonly gfx: Graphics) {}
+    constructor(private readonly gfx: Graphics, private readonly screen: Screen) {}
 
     /** The box a string will occupy, for centring and layout, without drawing it. */
     measure(text: string, style: TextStyle = {}): TextBox {
@@ -148,7 +163,7 @@ export class Typesetter {
      */
     render(text: string, style: TextStyle = {}): TextImage {
         const merged = { ...this.style, ...style };
-        const resolved = resolve(merged);
+        const resolved = resolve(merged, this.stretch);
         // A plain colour is a ramp of one, which is the whole difference
         // between antialiased text and the hard-edged kind.
         const ramp = merged.shades?.length ? merged.shades : [merged.color ?? 15];
@@ -156,6 +171,7 @@ export class Typesetter {
         const threshold = merged.threshold ?? 128;
 
         const key = `${resolved.font}|${resolved.lineHeight ?? ""}|${resolved.letterSpacing}|${resolved.align}`
+            + `|${resolved.stretch}`
             + `|${ramp.join(",")}|${background ?? ""}|${threshold} ${text}`;
         const hit = this.cache.get(key);
         if (hit) {
@@ -223,7 +239,7 @@ export class Typesetter {
      */
     async ready(style: TextStyle = {}): Promise<void> {
         if (typeof document === "undefined" || !document.fonts) return;
-        const resolved = resolve({ ...this.style, ...style });
+        const resolved = resolve({ ...this.style, ...style }, this.stretch);
         try {
             await document.fonts.load(resolved.font, "AZaz09");
         } catch {
@@ -237,10 +253,15 @@ export class Typesetter {
     forget(): void {
         this.cache.clear();
     }
+
+    /** What the mode does to a pixel: 2 where they are half as wide as they are tall. */
+    private get stretch(): number {
+        return 1 / this.screen.pixelAspect;
+    }
 }
 
 /** Fills in the defaults and assembles the CSS shorthand the host will want. */
-function resolve(style: TextStyle): ResolvedStyle {
+function resolve(style: TextStyle, stretch: number): ResolvedStyle {
     const size = style.size ?? 16;
     const parts: string[] = [];
     if (style.italic) parts.push("italic");
@@ -252,7 +273,8 @@ function resolve(style: TextStyle): ResolvedStyle {
         size,
         lineHeight: style.lineHeight,
         letterSpacing: style.letterSpacing ?? 0,
-        align: style.align ?? "left"
+        align: style.align ?? "left",
+        stretch: style.stretch ?? stretch
     };
 }
 
@@ -318,6 +340,12 @@ function context(): CanvasRenderingContext2D {
  * an italic f or a script tail hangs past both ends - so the box comes from the
  * bounding boxes the browser reports, and each line is drawn at its own origin
  * so that the overhang lands inside the picture rather than off the edge of it.
+ *
+ * All of that arithmetic happens in the font's own pixels and is scaled by
+ * `stretch` on the way out, which is what puts type of the right shape on a
+ * screen whose pixels are not square. The glyphs are drawn through the same
+ * scale rather than measured again, so the browser hints and spaces the line
+ * exactly as it would at any other size, and only the raster is wider.
  */
 export function rasteriseWithCanvas(text: string, style: ResolvedStyle): Coverage {
     const ctx = context();
@@ -351,22 +379,25 @@ export function rasteriseWithCanvas(text: string, style: ResolvedStyle): Coverag
 
     const baseline = Math.ceil(ascent);
     const lineHeight = Math.max(1, Math.round(style.lineHeight ?? ascent + descent));
-    const width = Math.max(1, Math.ceil(left + right));
+    const width = Math.max(1, Math.ceil((left + right) * style.stretch));
     const height = Math.max(1, baseline + Math.ceil(descent) + (lines.length - 1) * lineHeight);
 
     ctx.canvas.width = width;
     ctx.canvas.height = height;
     apply(ctx, style);                                  // the resize wiped all of it
+    ctx.setTransform(style.stretch, 0, 0, 1, 0, 0);     // wider pixels, the same em
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#fff";
 
     for (let i = 0; i < lines.length; ++i) {
         if (lines[i] === "") continue;
         // The origin is where the line's own overhang starts, shifted by
-        // however much narrower than the box this line came out.
-        const slack = width - (extents[i].left + extents[i].right);
+        // however much narrower than the box this line came out. Rounded in
+        // the pixels it will land in, then taken back through the scale.
+        const slack = width - (extents[i].left + extents[i].right) * style.stretch;
         const indent = style.align === "center" ? slack / 2 : style.align === "right" ? slack : 0;
-        ctx.fillText(lines[i], Math.round(extents[i].left + indent), baseline + i * lineHeight);
+        const origin = Math.round(extents[i].left * style.stretch + indent);
+        ctx.fillText(lines[i], origin / style.stretch, baseline + i * lineHeight);
     }
 
     // White on nothing: the alpha channel is the coverage, and the other three

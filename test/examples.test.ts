@@ -304,8 +304,8 @@ describe("the TYPE demo", () => {
     function ink(runtime: Awaited<ReturnType<typeof started>>): number {
         for (let i = 0; i < 100 && runtime.gfx.busy; ++i) runtime.step(1);
         let count = 0;
-        for (let y = 0; y < 212 - 18; ++y) {
-            for (let x = 0; x < 256; x += 2) if (runtime.gfx.getPixel(x, y) === 1) ++count;
+        for (let y = 0; y < runtime.screen.height - 18; ++y) {
+            for (let x = 0; x < runtime.screen.width; x += 2) if (runtime.gfx.getPixel(x, y) === 1) ++count;
         }
         return count;
     }
@@ -327,8 +327,8 @@ describe("the TYPE demo", () => {
     function counts(runtime: Awaited<ReturnType<typeof started>>): Map<number, number> {
         for (let i = 0; i < 100 && runtime.gfx.busy; ++i) runtime.step(1);
         const found = new Map<number, number>();
-        for (let y = 0; y < 212 - 18; ++y) {
-            for (let x = 0; x < 256; ++x) {
+        for (let y = 0; y < runtime.screen.height - 18; ++y) {
+            for (let x = 0; x < runtime.screen.width; ++x) {
                 const index = runtime.gfx.getPixel(x, y);
                 found.set(index, (found.get(index) ?? 0) + 1);
             }
@@ -370,19 +370,40 @@ describe("the TYPE demo", () => {
         expect(solid()).toBe(true);
     });
 
-    it("resets the sheet for each face, weight and specimen", async () => {
+    it("resets the sheet for each face and specimen", async () => {
         const runtime = await started();
-        const sizes = new Set<number>();
+        const widths = new Set<number>();
 
-        for (const button of [BUTTON.RIGHT, BUTTON.A, BUTTON.B]) {
+        for (const button of [BUTTON.RIGHT, BUTTON.B]) {
             press(runtime, button);
             // Each change abandons what was queued and starts the sheet again.
             expect(runtime.gfx.pending).toBe(1);
-            sizes.add(runtime.gfx.work);
+            widths.add(runtime.gfx.work);
             expect(ink(runtime)).toBeGreaterThan(0);
         }
-        // The specimens are different lengths, so the display line is too.
-        expect(sizes.size).toBeGreaterThan(1);
+        // The faces and the specimens are different widths, so the display
+        // line is too.
+        expect(widths.size).toBeGreaterThan(1);
+    });
+
+    it("sets the same sheet in SCREEN 7, twice as wide, and keeps its palette", async () => {
+        const runtime = await started();
+        const narrow = runtime.gfx.work;                // the display line, in SCREEN 5
+
+        press(runtime, BUTTON.A);
+        expect(runtime.screen.mode.name).toBe("G6");
+        expect(runtime.screen.width).toBe(512);
+        // The mode change would have taken the sheet's colours with it.
+        expect(runtime.screen.palette[0]).toEqual([7, 7, 5]);
+        expect(runtime.screen.palette[5]).toEqual([3, 3, 3]);
+
+        // The em is drawn twice as wide, so the same line is twice the pixels:
+        // type of the same shape, with twice the detail across it.
+        expect(runtime.gfx.work).toBeGreaterThan(narrow * 1.8);
+        expect(ink(runtime)).toBeGreaterThan(500);
+
+        press(runtime, BUTTON.A);
+        expect(runtime.screen.mode.name).toBe("G4");
     });
 
     it("says so and falls back to the ROM font where there is no text engine", async () => {

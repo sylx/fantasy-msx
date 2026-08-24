@@ -277,6 +277,13 @@ text should stay at one - at ten pixels an em there is no flank to resolve,
 only a blur where the stem was. `background` is the index behind the glyphs,
 and leaving it out makes the box transparent so only the glyphs land.
 
+The 512-wide modes are handled for you. A SCREEN 6 or 7 pixel is half as wide
+as it is tall, so a line set the way SCREEN 5 sets it would come out condensed
+to half its width; `text` draws the em twice as wide instead, and the same
+style gives type of the same shape with twice the detail across it. `stretch`
+overrides that - 1 to work in the mode's own pixels, anything else to condense
+or extend deliberately.
+
 Rendering is the expensive half, so the last hundred or so results are kept:
 a caption redrawn every frame costs one layout and then nothing. `text.forget()`
 drops them, which is what a late-arriving font needs (`load` and `ready` do it
@@ -420,9 +427,15 @@ the smoothing: it comes out of the sixteen colours everything else on screen is
 drawing from. A specimen sheet can afford three; a game with artwork usually
 cannot.
 
-**Left** and **right** change the face, **Z** the weight and italic, **X** the
-specimen. The faces are the CSS generic families rather than anything fetched,
-so whatever the machine running the page calls its serif is what gets set.
+**Z** switches between SCREEN 5 and SCREEN 7 - the same sheet, and twice the
+pixels across it. It is the one thing this machine can do for small type that
+no ramp can, and the strip at the foot of the page shows the other side of the
+bargain: the ROM font in SCREEN 7 is the same 6x8 cell over half-width pixels,
+so it comes out condensed exactly as an MSX's own SCREEN 7 text did.
+
+**Left** and **right** change the face - the CSS generic families rather than
+anything fetched, with a bold and an italic among them, so whatever the machine
+running the page calls its serif is what gets set. **X** changes the specimen.
 
 Both sizes on the sheet are fitted to the measure with `text.measure` before
 anything is drawn, and the body is wrapped on the same measurements the

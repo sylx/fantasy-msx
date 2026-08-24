@@ -102,6 +102,23 @@ describe("Text from the host's fonts", () => {
         expect(stub.calls[1].style.font).toBe("italic 700 8px 'Press Start 2P', monospace");
     });
 
+    it("takes the stretch from the mode, so type keeps its shape in the 512-wide ones", () => {
+        const { text, screen } = createBios();
+        const stub = wedge();
+        text.rasteriser = stub.rasterise;
+
+        text.render("x");                           // SCREEN 5: square pixels
+        screen.setMode("G6");
+        text.render("x");                           // SCREEN 7: half as wide as tall
+        expect(stub.calls.map((call) => call.style.stretch)).toEqual([1, 2]);
+
+        // SCREEN 8 is square again, and a style asking for the mode's own
+        // pixels comes to the same thing - both of which the cache already has.
+        screen.setMode("G7");
+        expect(text.render("x").pixels).toBe(text.render("x", { stretch: 1 }).pixels);
+        expect(stub.calls.length).toBe(2);
+    });
+
     it("takes its defaults from the style set on the typesetter", () => {
         const { text } = createBios();
         const stub = wedge();

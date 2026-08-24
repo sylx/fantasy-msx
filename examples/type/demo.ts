@@ -22,6 +22,14 @@
 // between this sheet's paper and its ink are set by the demo, in the palette,
 // before a word is set.
 //
+// Z switches between SCREEN 5 and SCREEN 7 - the same sheet, and twice the
+// pixels across it. A SCREEN 7 pixel is half as wide as it is tall, so type set
+// the way SCREEN 5 sets it would come out condensed to half its width; `text`
+// draws the em twice as wide instead, and the line keeps its shape and spends
+// the extra columns on detail. It is the one thing this machine can do for
+// small type that no ramp can: the sheet at the foot of the page, in the ROM
+// font, is condensed exactly as an MSX's own SCREEN 7 text was.
+//
 // Nothing here is fetched. The faces are the CSS generic families, so whatever
 // the machine running the page calls its serif is what gets set.
 //
@@ -32,7 +40,7 @@
 
 import {
     BUTTON, compile, opllVoice, psgVoice,
-    type App, type Context, type TextStyle, type Typesetter
+    type App, type Context, type ScreenModeName, type TextStyle, type Typesetter
 } from "../../src/index.js";
 
 // --- The sheet ---------------------------------------------------------------
@@ -73,23 +81,30 @@ const RAMPS: ReadonlyArray<{ label: string; shades: readonly number[] }> = [
 // --- What we can switch between ----------------------------------------------
 
 /**
- * The CSS generic families. Naming a face outright would mean shipping it or
- * fetching it; these are whatever the host has already decided they are, which
- * is also the honest demonstration - the machine is borrowing the page's fonts.
+ * The CSS generic families, with a weight and an italic among them. Naming a
+ * face outright would mean shipping it or fetching it; these are whatever the
+ * host has already decided they are, which is also the honest demonstration -
+ * the machine is borrowing the page's fonts.
  */
-const FACES: ReadonlyArray<{ label: string; css: string }> = [
-    { label: "SANS-SERIF", css: "sans-serif" },
-    { label: "SERIF", css: "serif" },
-    { label: "MONOSPACE", css: "monospace" },
-    { label: "CURSIVE", css: "cursive" },
-    { label: "SYSTEM-UI", css: "system-ui" }
+const FACES: ReadonlyArray<{ label: string; style: TextStyle }> = [
+    { label: "SANS-SERIF", style: { font: "sans-serif" } },
+    { label: "SANS-SERIF BOLD", style: { font: "sans-serif", weight: 700 } },
+    { label: "SERIF", style: { font: "serif" } },
+    { label: "SERIF ITALIC", style: { font: "serif", italic: true } },
+    { label: "MONOSPACE", style: { font: "monospace" } },
+    { label: "CURSIVE", style: { font: "cursive" } },
+    { label: "SYSTEM-UI", style: { font: "system-ui" } }
 ];
 
-const STYLES: ReadonlyArray<{ label: string; style: TextStyle }> = [
-    { label: "REGULAR", style: {} },
-    { label: "BOLD", style: { weight: 700 } },
-    { label: "ITALIC", style: { italic: true } },
-    { label: "BOLD ITALIC", style: { weight: 700, italic: true } }
+/**
+ * The two modes worth setting type in. Both give sixteen colours; SCREEN 7
+ * gives twice the pixels across the same picture, so its pixels are half as
+ * wide as they are tall - which `text` corrects for, drawing the em twice as
+ * wide so that a line keeps its shape and gains the detail instead.
+ */
+const MODES: ReadonlyArray<{ name: ScreenModeName; screen: number }> = [
+    { name: "G4", screen: 5 },
+    { name: "G6", screen: 7 }
 ];
 
 interface Sample {
@@ -132,7 +147,7 @@ const SCORE = compile([
 // --- State -------------------------------------------------------------------
 
 let face = 0;
-let style = 0;
+let mode = 0;
 let sample = 0;
 let ramp = 2;
 /** Set whenever something changed and the sheet has to be set again. */
@@ -185,18 +200,23 @@ function wrap(text: Typesetter, source: string, style: TextStyle, width: number)
 
 function compose(ctx: Context): void {
     const { gfx, text, screen } = ctx;
-    const measure = screen.width - MARGIN * 2;
     const chosen = SAMPLES[sample];
-    const base: TextStyle = { font: FACES[face].css, ...STYLES[style].style, shades: RAMPS[ramp].shades };
+    const base: TextStyle = { ...FACES[face].style, shades: RAMPS[ramp].shades };
 
     const started = performance.now();
 
     gfx.abandon();                                  // drop a headline still arriving
+    if (screen.mode.name !== MODES[mode].name) dress(ctx);
+
+    // Margins are a distance across the picture rather than a pixel count, so
+    // they double along with everything else in the 512-wide mode.
+    const margin = MARGIN * columns(ctx);
+    const measure = screen.width - margin * 2;
     gfx.now.clear(PAPER);
 
     // The display line, queued: the only part of the sheet you watch arrive.
     displaySize = fit(text, chosen.display, base, measure, DISPLAY_SIZES);
-    const display = text.draw(MARGIN, MARGIN, chosen.display, { ...base, size: displaySize });
+    const display = text.draw(margin, MARGIN, chosen.display, { ...base, size: displaySize });
     displayWidth = display.width;
     let y = MARGIN + display.height + 3;
 
@@ -206,29 +226,55 @@ function compose(ctx: Context): void {
     // wrapped even so, since a face wide enough to defeat every size on the
     // list should run onto a second line rather than off the page.
     const subhead = { ...base, size: fit(text, chosen.line, base, measure, SUBHEAD_SIZES) };
-    y += text.drawNow(MARGIN, y, wrap(text, chosen.line, subhead, measure).join("\n"), subhead).height + 5;
+    y += text.drawNow(margin, y, wrap(text, chosen.line, subhead, measure).join("\n"), subhead).height + 5;
 
     // The body, wrapped to the measure and cut to what is left of the page.
     const body = { ...base, size: BODY_SIZE, lineHeight: BODY_LEADING };
     const romTop = screen.height - STATUS_HEIGHT - 22;
     const lines = wrap(text, chosen.body, body, measure).slice(0, Math.max(0, ((romTop - 6) - y) / BODY_LEADING) | 0);
-    if (lines.length > 0) text.drawNow(MARGIN, y, lines.join("\n"), body);
+    if (lines.length > 0) text.drawNow(margin, y, lines.join("\n"), body);
 
     rule(ctx, romTop - 6);
 
-    // The same line in the font the machine actually has. On the Japanese
-    // sample every glyph of it comes out as a question mark, which is the ROM
-    // being honest about what it was given.
-    gfx.now.text(MARGIN, romTop, "THE MACHINE'S OWN 6X8 FONT:", RULE);
-    gfx.now.text(MARGIN, romTop + 10, chosen.line.toUpperCase().slice(0, 40), INK);
+    // The same line in the font the machine actually has - which in SCREEN 7
+    // is the same 6x8 cell over half-width pixels, so it comes out condensed
+    // and twice as much of it fits. On the Japanese sample every glyph of it
+    // is a question mark, which is the ROM being honest about what it was given.
+    gfx.now.text(margin, romTop, "THE MACHINE'S OWN 6X8 FONT:", RULE);
+    gfx.now.text(margin, romTop + 10, chosen.line.toUpperCase().slice(0, (measure / 6) | 0), INK);
 
     cost = performance.now() - started;
     readout(ctx);
 }
 
+/**
+ * Sets the mode and lays the palette out in it. Both have to happen together:
+ * a mode change is where the sheet's own colours would otherwise be lost.
+ */
+function dress(ctx: Context): void {
+    ctx.screen.setMode(MODES[mode].name);
+    // Paper, ink, a grey for the rules, and a red for the running head - then
+    // three steps from the paper down to the ink, which is what the ramps
+    // spend. Setting them here is the point: the smoothing is the demo's own
+    // palette decision, not something `text` went and made.
+    ctx.screen.setColor(PAPER, 7, 7, 5);
+    ctx.screen.setColor(INK, 0, 0, 1);
+    ctx.screen.setColor(RULE, 5, 5, 4);
+    ctx.screen.setColor(ACCENT, 6, 1, 0);
+    ctx.screen.setColor(PALE, 5, 5, 4);
+    ctx.screen.setColor(MID, 3, 3, 3);
+    ctx.screen.setColor(DEEP, 1, 1, 2);
+}
+
+/** How many of the mode's pixels go where one of SCREEN 5's would: 1, or 2. */
+function columns(ctx: Context): number {
+    return ctx.screen.width / 256;
+}
+
 /** A hairline across the measure, and how much of the page it took. */
 function rule(ctx: Context, y: number): number {
-    ctx.gfx.now.fillRect(MARGIN, y, ctx.screen.width - MARGIN * 2, 1, RULE);
+    const margin = MARGIN * columns(ctx);
+    ctx.gfx.now.fillRect(margin, y, ctx.screen.width - margin * 2, 1, RULE);
     return 1;
 }
 
@@ -236,17 +282,19 @@ function readout(ctx: Context): void {
     const { gfx, screen } = ctx;
     const top = screen.height - STATUS_HEIGHT + 1;
 
+    const margin = MARGIN * columns(ctx);
     gfx.now.fillRect(0, top - 2, screen.width, STATUS_HEIGHT + 2, PAPER);
-    gfx.now.text(MARGIN, top,
-        `${FACES[face].label} ${STYLES[style].label}`.slice(0, 40), ACCENT, PAPER);
-    gfx.now.text(MARGIN, top + 8,
+    gfx.now.text(margin, top,
+        `SCREEN ${MODES[mode].screen}  ${FACES[face].label}`, ACCENT, PAPER);
+    gfx.now.text(margin, top + 8,
         `${RAMPS[ramp].label}  ${displaySize}PX ${displayWidth}W  ${Math.round(cost)}MS`, INK, PAPER);
 
     // The ramp itself, one swatch a register, at the end of the line: what the
     // smoothing is costing, said in the currency it is paid in.
     const shades = RAMPS[ramp].shades;
+    const swatch = 7 * columns(ctx);
     for (let i = 0; i < shades.length; ++i) {
-        gfx.now.fillRect(screen.width - MARGIN - (shades.length - i) * 8, top + 8, 7, 7, shades[i]);
+        gfx.now.fillRect(screen.width - margin - (shades.length - i) * (swatch + 1), top + 8, swatch, 7, shades[i]);
     }
 }
 
@@ -264,24 +312,13 @@ function apologise(ctx: Context, why: string): void {
 export const demo: App = {
     init(ctx) {
         face = 0;
-        style = 0;
+        mode = 0;
         sample = 0;
         ramp = 2;
         dirty = true;
         failure = null;
 
-        ctx.screen.setMode("G4");
-        // Paper, ink, a grey for the rules, and a red for the running head -
-        // then three steps from the paper down to the ink, which is what the
-        // ramps spend. Setting them here is the point: the smoothing is the
-        // demo's own palette decision, not something `text` went and made.
-        ctx.screen.setColor(PAPER, 7, 7, 5);
-        ctx.screen.setColor(INK, 0, 0, 1);
-        ctx.screen.setColor(RULE, 5, 5, 4);
-        ctx.screen.setColor(ACCENT, 6, 1, 0);
-        ctx.screen.setColor(PALE, 5, 5, 4);
-        ctx.screen.setColor(MID, 3, 3, 3);
-        ctx.screen.setColor(DEEP, 1, 1, 2);
+        dress(ctx);
 
         // Chosen once, so every call below passes only what changes.
         ctx.text.style = { color: INK };
@@ -300,7 +337,7 @@ export const demo: App = {
         if (input.btnp(BUTTON.LEFT)) { face = (face + FACES.length - 1) % FACES.length; dirty = true; }
         if (input.btnp(BUTTON.DOWN)) { ramp = (ramp + 1) % RAMPS.length; dirty = true; }
         if (input.btnp(BUTTON.UP)) { ramp = (ramp + RAMPS.length - 1) % RAMPS.length; dirty = true; }
-        if (input.btnp(BUTTON.A)) { style = (style + 1) % STYLES.length; dirty = true; }
+        if (input.btnp(BUTTON.A)) { mode = (mode + 1) % MODES.length; dirty = true; }
         if (input.btnp(BUTTON.B)) { sample = (sample + 1) % SAMPLES.length; dirty = true; }
     },
 
@@ -318,8 +355,9 @@ export const demo: App = {
 
         if (failure) return;
 
-        // The headline arriving, along the last two lines of the screen.
-        const bar = Math.min(ctx.screen.width, Math.round(ctx.gfx.work / 40));
+        // The headline arriving, along the last two lines of the screen. It is
+        // twice the pixels in SCREEN 7, so the bar is scaled to match.
+        const bar = Math.min(ctx.screen.width, Math.round(ctx.gfx.work / 40 / columns(ctx)));
         ctx.gfx.now.fillRect(0, ctx.screen.height - 2, ctx.screen.width, 2, PAPER);
         if (bar > 0) ctx.gfx.now.fillRect(0, ctx.screen.height - 2, bar, 2, ACCENT);
     }
