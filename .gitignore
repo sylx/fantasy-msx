@@ -4,3 +4,5 @@ dist/
 /tmp/
 
 dist/
+spike/hechima/vendor/
+public/hechima/

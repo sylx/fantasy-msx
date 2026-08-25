@@ -42,6 +42,27 @@ export const EXAMPLES: readonly Example[] = [
         load: async () => (await import("./type/demo.js")).demo
     },
     {
+        id: "editor",
+        title: "EDITOR",
+        summary: "A text screen with no text mode underneath it. SCREEN 7 is a bitmap, and the grid is 85 by 26 cells of the machine's own 6x8 font laid over it - eighty columns once the line numbers have theirs, which is what eighty column text on an MSX2 was for. The whole visible page is re-emitted every frame and only the cells that changed reach VRAM: REPAINT in the status bar counts them, and a keystroke is worth two.",
+        controls: "type · arrows, Home / End, PageUp / PageDown · Backspace, Delete, Tab · ctrl and cmd are left to the browser",
+        load: async () => (await import("./editor/demo.js")).demo
+    },
+    {
+        id: "kanji",
+        title: "KANJI",
+        summary: "The font cache, and the page it lives in. A Japanese MSX2 copied glyphs out of a kanji ROM into VRAM; this machine has no such ROM, so the host's typefaces are rasterised and cached in a page instead. X flips the display to that page - you are then looking at the font itself, in the order the characters were first asked for. Sixteen full-width characters to a line is not a layout choice: it is what a 16x16 kanji leaves of a 256-pixel screen, and what Japanese MSX software had to work with.",
+        controls: "X to look at the VRAM page \u00b7 Z for antialiasing \u00b7 left / right for the passage \u00b7 up / down for the cell size",
+        load: async () => (await import("./kanji/demo.js")).demo
+    },
+    {
+        id: "ime",
+        title: "IME",
+        summary: "Typing Japanese, with nothing on screen the V9938 did not draw. The conversion is Mozc, built with Emscripten and running in a worker, behind a session layer with no UI of its own - so what comes back is a preedit and a list of candidates as data, and the candidate bar along the bottom is cells in the same palette and the same glyphs as everything else. Z starts the 15MB download; nothing is fetched before that.",
+        controls: "Z to load the dictionary \u00b7 type \u00b7 Space to convert and cycle \u00b7 1-9 to take a candidate \u00b7 Enter to settle \u00b7 Ctrl+Space for kana or direct",
+        load: async () => (await import("./ime/demo.js")).demo
+    },
+    {
         id: "loom",
         title: "LOOM",
         summary: "A composing machine. The chords come out of a Markov chain over scale degrees, the tune is a motif walked across them, and a sequencer on the vertical interrupt hands the lot to the chips a sixteenth at a time - four FM voices, the OPLL's rhythm mode, and the PSG doing the arpeggio, the echo and the hi-hat. The desk along the bottom is worked with the mouse: every part has the chip's own level, its own voice and a mute.",

@@ -98,17 +98,28 @@ export class BrowserHost implements Host {
             void this.audio.start();
         }
 
+        const keyboard = runtime.keyboard;
         const onKey = (event: KeyboardEvent, down: boolean) => {
+            // The browser's own repeats are dropped: the runtime makes its own,
+            // so a headless run and this one see the same keystrokes.
             if (event.repeat) return;
             // Browsers keep audio suspended until the user does something.
             if (down) void this.audio?.resume();
-            // Swallow only the keys the machine claims, so browser shortcuts survive.
-            if (input.setKey(event.code, down)) event.preventDefault();
+
+            if (down) keyboard.press(event);
+            else keyboard.release(event.code);
+
+            // Swallow only the keys the machine claims, so browser shortcuts
+            // survive - the joystick's, and while text is being typed the keys
+            // the page would otherwise scroll or navigate with.
+            const bound = input.setKey(event.code, down);
+            if (bound || keyboard.claims(event)) event.preventDefault();
         };
         const keyDown = (event: KeyboardEvent) => onKey(event, true);
         const keyUp = (event: KeyboardEvent) => onKey(event, false);
         const blur = () => {
             input.releaseAll();
+            keyboard.releaseAll();
             runtime.pointer.releaseAll();
             this.audio?.flush();
         };

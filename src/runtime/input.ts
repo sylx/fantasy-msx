@@ -37,10 +37,30 @@ export class Input {
     private readonly keysDown = new Set<string>();
     private readonly keysWere = new Set<string>();
     private keyMap: ReadonlyArray<Readonly<Record<string, Button>>> = DEFAULT_KEY_MAP;
+    private typingNow = false;
 
     /** Replaces the keyboard bindings. One record per player. */
     setKeyMap(map: ReadonlyArray<Readonly<Record<string, Button>>>): void {
         this.keyMap = map;
+    }
+
+    /**
+     * True while the keyboard is being typed on rather than played, which the
+     * runtime sets from `Keyboard.capturing`. The keymap goes quiet - Z and X
+     * are letters again - and raw keys go on being recorded, since `key()` is
+     * about which keys are down and that does not change with the use they are
+     * being put to.
+     */
+    get typing(): boolean {
+        return this.typingNow;
+    }
+
+    setTyping(on: boolean): void {
+        if (on === this.typingNow) return;
+        this.typingNow = on;
+        // A key holding a button down may never be seen coming up now that the
+        // keymap has stopped listening, so nothing stays held across the change.
+        if (on) this.current.fill(0);
     }
 
     // --- Reading ----------------------------------------------------------
@@ -96,6 +116,7 @@ export class Input {
     setKey(code: string, down: boolean): boolean {
         if (down) this.keysDown.add(code);
         else this.keysDown.delete(code);
+        if (this.typingNow) return false;
 
         let bound = false;
         for (let player = 0; player < this.keyMap.length; ++player) {

@@ -11,9 +11,10 @@
 // the VDP composites every scanline for nothing.
 
 import type { Bios } from "../bios/index.js";
-import type { Graphics, Images, Screen, SoundDriver, Sprites, Typesetter } from "../bios/index.js";
+import type { Console, Graphics, Images, Ime, Screen, SoundDriver, Sprites, Typesetter } from "../bios/index.js";
 import type { Frame } from "../core/machine.js";
 import { Input } from "./input.js";
+import { Keyboard } from "./keyboard.js";
 import { Pointer } from "./pointer.js";
 
 /** What the game is handed every frame. */
@@ -26,9 +27,22 @@ export interface Context {
     readonly image: Images;
     /** Text in the host's own fonts, rasterised outside the machine and carried in. */
     readonly text: Typesetter;
+    /** A character grid over the bitmap, repainted a changed cell at a time. */
+    readonly console: Console;
+    /**
+     * Japanese input: keystrokes in, a preedit and candidates out, drawn by the
+     * machine rather than by the browser. Inert until an engine is attached.
+     */
+    readonly ime: Ime;
     /** Music and effects. Already ticking on the vertical interrupt. */
     readonly bgm: SoundDriver;
     readonly input: Input;
+    /**
+     * Keys as things to type on rather than to play: a queue of keystrokes in
+     * the order they arrived, drained once a frame. `capturing` is how an app
+     * says it wants them.
+     */
+    readonly keyboard: Keyboard;
     /**
      * The mouse, in screen pixels. Hosts that have no pointing device simply
      * never move it, and `pointer.present` says which case you are in.
@@ -97,11 +111,15 @@ export const FRAME_RATE = 60;
 export class Runtime implements Context {
     readonly input = new Input();
     readonly pointer = new Pointer();
+    readonly keyboard = new Keyboard();
     private app: App | null = null;
     private frameCount = 0;
     private running = false;
 
     constructor(readonly bios: Bios, private readonly host: Host) {
+        // Typing and playing are two uses of one keyboard: while it is being
+        // typed on, the joystick keymap has to stop reading Z and X as triggers.
+        this.keyboard.onCapture = (capturing) => this.input.setTyping(capturing);
         this.host.attach?.(this);
     }
 
@@ -123,6 +141,14 @@ export class Runtime implements Context {
 
     get text(): Typesetter {
         return this.bios.text;
+    }
+
+    get console(): Console {
+        return this.bios.console;
+    }
+
+    get ime(): Ime {
+        return this.bios.ime;
     }
 
     get bgm(): SoundDriver {
@@ -174,6 +200,9 @@ export class Runtime implements Context {
     }
 
     private tick(): void {
+        // Repeats are made before the app looks, so a held key reads as a fresh
+        // keystroke in the frame it is due rather than the one after.
+        this.keyboard.tick();
         this.app?.update(this);
         this.app?.draw?.(this);
 
@@ -185,5 +214,6 @@ export class Runtime implements Context {
         // read as newly pressed when the next update looks at it.
         this.input.latch();
         this.pointer.latch();
+        this.keyboard.latch();
     }
 }

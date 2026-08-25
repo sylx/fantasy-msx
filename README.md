@@ -45,6 +45,9 @@ same position an MSX program's VBlank handler occupies.
 | L2 BIOS | music: MML and a frame-driven driver | done |
 | L2 BIOS | images: a URL in, VRAM out, reduced to the mode | done |
 | L2 BIOS | text: the host's fonts, rasterised outside and carried in | done |
+| L2 BIOS | console: a character grid, repainted a changed cell at a time | done |
+| L2 BIOS | atlas: the host's glyphs cached in VRAM, in place of a kanji ROM | done |
+| L2 BIOS | ime: kana-kanji conversion, drawn by the machine | done |
 | app | `init` / `update` / `draw` | done |
 
 ### Drawing takes time, and you can see it
@@ -356,6 +359,240 @@ movement at a time through a joystick port, integrated by the program itself.
 This is the host's own pointer, handed over in the machine's coordinates.
 
 
+## Typing, and a screen made of characters
+
+`input` is the joystick: six buttons, two ports, latched once a frame so
+`btnp` means "since the last update". That shape is right for a game and wrong
+for text. A key held down is a level; a key *typed* is an event, and two of
+them in one frame are two characters that both have to arrive, in the order
+they were struck. So `ctx.keyboard` is a queue rather than a latch - the third
+sibling of `input` and `pointer` rather than a part of either.
+
+```ts
+update({ keyboard }) {
+    keyboard.capturing = true;               // said once: this app is typed into
+
+    for (const event of keyboard.take()) {   // in the order they were struck
+        if (event.key === "Backspace") backspace();
+        else if (event.key.length === 1) insert(event.key);
+    }
+}
+```
+
+`key` is the character the key produced - already shifted, already through the
+host's layout - and a name like `"Enter"` or `"ArrowLeft"` when it produced
+none. `code` is the physical key underneath it, which is what a game binds.
+Anything not read is dropped at the end of the frame, so an app that ignores
+the keyboard does not accumulate one.
+
+`capturing` says the machine is being typed into rather than played, and two
+things follow. The joystick keymap goes quiet, so Z and X are letters again.
+And the host stops the page acting on the keys itself - no scrolling on space,
+no going back on backspace - except for anything held with ctrl, alt or the
+platform key, which is left to the browser so its own shortcuts survive being
+typed at.
+
+Auto-repeat is made here rather than taken from the browser: half a second,
+then thirty a second, counted in frames. A headless run and a browser run
+therefore produce the same keystrokes from the same keys, which is what lets
+`keyboard.type("hello")` stand in for a keyboard in a test.
+
+**Nothing here composes.** There is no preedit and no candidate list, because
+the plan is for kana-kanji conversion to happen inside the machine, where the
+V9938 can draw the candidates in the palette everything else is drawn in and a
+gamepad can pick from them. What a host hands over is keystrokes.
+
+### The console
+
+`ctx.console` is a grid of characters laid over the bitmap. Not a V9938 text
+mode - those are pattern-based and have only the glyphs in a ROM, which is
+exactly the wall a Japanese text screen runs into. A Japanese MSX2 answered
+that with a kanji ROM and a driver that copied patterns out of it into VRAM,
+and the same answer works here with the host's fonts in the ROM's place.
+
+```ts
+const term = ctx.console;                  // 85x26 in SCREEN 7, 42x26 in SCREEN 5
+
+term.color(15, 0);
+term.cls();
+term.writeln("READY");                     // streaming: wraps, scrolls, knows \n and \t
+term.text(0, 25, status, 15, 4);           // addressed: no wrap, no scroll, no cursor move
+term.locate(col, row);
+term.cursorOn = frame % 32 < 20;
+term.flush();                              // and only now does anything reach VRAM
+```
+
+What makes it a console rather than a loop calling `gfx.text` is the shadow
+buffer. Every cell's character and colours are kept, writes go into that, and
+`flush` paints only the cells that actually changed. An app can therefore
+re-emit its whole visible page every frame and pay for what moved:
+`term.repainted` is the count, and on an idle screen it is zero.
+
+Scrolling is the other half of that bargain. `term.scroll(lines, fromRow,
+rowCount)` moves a band of rows with one VRAM-to-VRAM copy - the cheapest thing
+the chip does, and why text screens scrolled as fast as they did - and leaves
+only the row the copy uncovered needing paint.
+
+Painting goes through `gfx.now` rather than the blitter, deliberately. A caret
+that arrives three frames after the key was struck is a broken caret, and this
+is the case `gfx.now` exists for.
+
+The glyphs come from a `GlyphSource`, which is where the next step goes in: the
+ROM font is one implementation, and a cache of host-rasterised glyphs living in
+a spare VRAM page - this machine's answer to a kanji ROM - is the other.
+Nothing above that interface knows which it is talking to.
+
+
+### Kanji, and the page they live in
+
+The ROM font stops at ASCII 126, and the glyphs a Japanese screen needs were
+never in it. A Japanese MSX2 answered that with a **kanji ROM** and a driver
+that copied the bitmaps it needed out of it into VRAM, so the screen could then
+be built out of VRAM-to-VRAM copies. `VramAtlas` is that arrangement with the
+ROM replaced by the host's own typefaces - the same bargain `text` strikes for
+display type, applied to a grid.
+
+```ts
+const atlas = new VramAtlas(bios.system.vdp, screen, text, {
+    page: 1,                                  // a page nothing is drawn on
+    cellHeight: 16,                           // what a kanji ROM's glyphs were
+    style: { font: "'Noto Sans Mono CJK JP', monospace" }
+});
+console.setFont(atlas);
+console.text(0, 0, "日本語");                 // two cells each, and cached after the first
+```
+
+The browser's rasteriser is asked for a character **once, ever**. What it gives
+back lands in a page of VRAM, and every appearance after that is a copy inside
+video memory. The point of that is not speed - the console paints immediately,
+so nothing is being paced - it is that **the budget becomes real**: a page holds
+512 half-width slots, a kanji takes two, and past 256 of them something has to
+go. `atlas.stats` reports `used`, `misses` and `evictions`, which is a number an
+MSX programmer would have recognised.
+
+**Levels, not colours.** Storing a glyph in the colours it will be drawn in
+would mean one entry per colour pair, and the 512 would go four times as fast.
+So the page holds *coverage levels* - 0 for the paper, 1 upward for the ink -
+and the colour is applied on the way out by a 256-entry table that recolours a
+whole byte of packed pixels at once. One entry per character, any colours, and
+the copy stays byte-at-a-time, which is what `HMMM` does on the chip.
+
+That table is also where antialiasing lives, and the palette is an input as
+everywhere else: `levels: 3` stores a flank, and `ramp` says which registers it
+is spent on.
+
+```ts
+new VramAtlas(vdp, screen, text, { levels: 3, ramp: (ink) => [13, 14, ink] });
+```
+
+**The cell decides the size, not the style.** A CJK face declares an ascent and
+descent coming to nearly one and a half times its em, so a 16-pixel cell asked
+for "16px" comes back holding ten pixels of type with air round it. So the atlas
+measures the *ink* - it rasterises a glyph that fills its em square, finds the
+covered pixels, and scales until they fill the cell. `stats.size` is the em it
+settled on, which is rarely the one asked for.
+
+**Two cells for the wide ones.** `charCells` is Unicode's East Asian Width: the
+kana and kanji take two, half-width katakana take one. The console counts in
+cells throughout - the caret cannot land inside a kanji, a wrap moves a whole
+character to the next line, and writing over half of one turns the stranded half
+into a space rather than leaving a fragment.
+
+Sixteen full-width characters to a line is not a layout decision. It is what a
+16x16 glyph leaves of a 256-pixel screen, and it is what Japanese MSX software
+had to work with. SCREEN 7 does not give more of them - its pixels are half as
+wide, so the same sixteen occupy the same width and get twice the detail.
+
+
+### Japanese input
+
+The browser has an input method and this does not use it. Its candidate window
+floats over the canvas in the system's typeface at the system's size, and on a
+screen of sixteen colours and 16x16 cells that is not a candidate window - it is
+a browser drawn on top of a machine.
+
+So the conversion happens inside. The engine is
+[hechima](https://github.com/msonrm/hechima): Mozc built with Emscripten, in a
+worker, behind a session layer that has no UI of its own. What comes back is a
+preedit and a list of candidates **as data**, and where they go is the machine's
+business.
+
+```ts
+const hechima = await connectHechima({
+    onProgress: (loaded, total) => drawProgress(loaded / total)   // about 15MB, once
+});
+ime.attach(hechima.session);
+ime.enabled = true;
+
+update({ ime, keyboard }) {
+    // The engine gets first refusal; what it does not want comes back.
+    for (const event of ime.feed(keyboard.take())) edit(event);
+    document += ime.takeText();          // whatever it settled since last frame
+}
+
+draw({ ime, console }) {
+    for (const segment of ime.segments) {
+        // "yomi" is the raw reading, "focus" the clause being chosen, "other" the rest
+    }
+    ime.candidates.forEach((text, i) => console.text(...));   // and ime.selected
+}
+```
+
+`ime.feed` is given a frame's keystrokes and hands back the ones the engine
+refused - a cursor key with nothing being composed belongs to whatever the app
+is editing. Committed text arrives through `takeText`, which is a mailbox rather
+than a return value: the worker answers between frames, not inside the one that
+asked. `ime.select(n)` takes a candidate outright, which is what a bar you can
+point a joystick at needs.
+
+**The engine is a seam.** `ImeSession` is three methods, hechima's `FepSession`
+satisfies it as shipped, and a test supplies its own - so the conversion
+behaviour is testable without a dictionary anywhere near it. `host/hechima.ts`
+is the only file that knows hechima exists.
+
+**It runs headless.** hechima ships as a Web Worker script, which node has no
+notion of, but `HechimaWorkerLike` is structural - `postMessage` and
+`addEventListener` - so a faked worker global scope is enough to bring the whole
+engine up outside a browser. `spike/hechima/node-probe.mjs` does exactly that in
+about forty lines, which means a conversion is a thing a test can look at.
+
+Three things follow from doing it this way that a host IME cannot give:
+
+| | |
+|---|---|
+| the candidate bar | in the palette everything else is in, in the same glyphs |
+| a gamepad | it is a list and an index, so anything can pick from it |
+| a screenshot | of a conversion, headless, reproducible |
+
+#### What it costs, and where the files are
+
+About 15MB over the wire, nearly all of it Mozc's dictionary, fetched once and
+cached by the browser thereafter. Nothing is fetched until `connectHechima` is
+called, so an app that never asks for Japanese never pays.
+
+The bundles are not vendored into this repository - they are 21.9MB and belong
+to another project that is explicit about breaking across its own layer
+boundaries. `scripts/fetch-hechima.sh` puts a pinned set (the combination
+hechima's own `VENDOR.md` calls verified) under `public/hechima/`, which vite
+copies into the build; the Pages workflow runs it before building. Without it
+the IME example still loads and says it cannot convert.
+
+Paths given to the worker are resolved relative to **the worker script**, not to
+the page, which is what lets the whole thing work under a subpath like
+`sylx.github.io/fantasy-msx/`. The single-thread wasm build needs no COOP/COEP
+headers, which is what lets it work on Pages at all.
+
+Conversion is powered by Mozc (BSD-3-Clause + NAIST License + Public Domain);
+`scripts/fetch-hechima.sh` writes the attribution alongside the files.
+
+#### What is not there yet
+
+Key **releases** are not passed to the engine. The chord layouts hechima ships -
+NICOLA, and the naginata arrangement - decide what a key means by what is held
+with it, so they need them; the romaji path does not, and `Keyboard` does not
+queue them yet.
+
+
 ## Examples
 
 ```bash
@@ -477,6 +714,80 @@ rasteriser will use. The display line is queued rather than written, so you
 watch it lay down; everything under it is `drawNow`, since a specimen sheet
 that arrived in instalments would be unreadable while it did.
 
+### EDITOR
+
+A text screen with no text mode underneath it. SCREEN 7 is a bitmap, and the
+grid is 85 by 26 cells of the machine's own 6x8 font laid over it - eighty
+columns once the line numbers have theirs, which is what eighty column text on
+an MSX2 was for. The pixels are half as wide as they are tall, so the ROM font
+comes out condensed exactly as an MSX's own 80 column text did.
+
+Type into it. The number worth watching is **LAST EDIT** in the status bar. The
+editor re-emits its whole visible page every frame - twenty-four rows of
+eighty-five cells, unconditionally - and the console touches VRAM only where
+the shadow buffer disagrees. Adding a character to the end of a line is worth
+four cells of the two thousand two hundred and ten: the letter, the cell the
+caret came off, and two digits in the bar saying so. Inserting one in the
+middle is worth the rest of that line, because the rest of that line moved.
+
+Scrolling is worth a row rather than a page. Moving the view is handed to
+`console.scroll`, which copies the band of pixels between the two bars within
+VRAM and moves the shadow buffer with it, so only the uncovered row is drawn -
+ninety-odd cells for a line, against all of them for a page.
+
+The keyboard is captured, so Z and X are letters and the page stops scrolling
+on space. Keys held with ctrl or the platform key are left to the browser,
+which is why this editor has no shortcuts. What it has not got is Japanese, and
+the shape of that gap is the point: the keyboard carries keystrokes and nothing
+else, and the glyphs come from a ROM that never had them.
+
+
+### KANJI
+
+The font cache, and the page it lives in. **X flips the display to that page**,
+which is the key worth pressing: you are then looking at the font itself, laid
+out in the order the characters were first asked for. Nothing about it is a
+diagram - it is the actual memory the text on the other page is copied from.
+
+It is also dark until it is lent a colour, and that is the honest part. The page
+holds coverage levels rather than palette indices, so a screen pointed straight
+at it is showing entries 1 to 3, which nothing has any reason to have set. The
+demo lends those levels exactly the colours the text on the other page is drawn
+in, and puts them back afterwards.
+
+**Z** turns the antialiasing on, which is the other half of what SCREEN 7 buys
+and costs two registers to have. **Up and down** change the cell size, and both
+numbers in the readout move with it: a smaller cell fits more text on the screen
+*and* more glyphs in the page. **Left and right** change the passage.
+
+```
+125/512  M74  E0                    16px HARD
+```
+
+Slots taken of slots there are, then the times the rasteriser had to be asked
+and the times a character was thrown out to make room. On a page of Japanese the
+first number climbs to a few hundred and stops; on a longer one, `E` starts
+counting.
+
+
+### IME
+
+Typing Japanese, with nothing on screen the V9938 did not draw. **Z starts the
+15MB download** - nothing is fetched before that, and the bar that fills while
+it arrives is drawn in cells like everything else.
+
+The preedit sits inline where the caret is: the clause being chosen is inverted,
+the rest are on a colour of their own, which is how a FEP marked them. **The bar
+along the bottom is the candidate list**, and it is at the bottom rather than
+under the caret because a line here is sixteen full-width characters and a popup
+would cover the sentence it is about - which is where Japanese MSX software put
+it, for the same reason.
+
+**Space** converts and then cycles. **1 to 9** take a candidate straight off the
+bar. **Enter** settles it, **Ctrl+Space** switches between kana and direct, and
+everything else types.
+
+
 ### LOOM
 
 A composing machine, and a mixing desk to hear it through. There is no MML in
@@ -552,6 +863,7 @@ npm run play -- out.png     # INK, headless, with a scripted controller
 npm run wire -- out.png     # WIRE, four frames of it
 npm run haze -- out.png     # HAZE, one frame of each of its five patterns
 npm run loom -- out.png     # LOOM, with the desk worked by a scripted mouse
+npm run editor -- out.png   # EDITOR, typed into by a scripted keyboard
 ```
 
 ## Writing a game
@@ -668,6 +980,7 @@ Fixed, and not configurable: **MSX2, V9938, NTSC 60Hz, 128KB VRAM**.
 ```bash
 git submodule update --init      # fetch WebMSX
 npm install
+./scripts/fetch-hechima.sh       # the conversion engine, 21.9MB, for the IME example
 npm run vendor                   # re-copy the WebMSX core (only after a submodule bump)
 npm test
 npm run dev                      # the example, in a browser

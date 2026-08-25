@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>hechima spike</title>
+<style>
+    body { margin: 0; padding: 1.2rem; background: #0d0d14; color: #9a9ab4;
+           font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    h1 { font-size: 13px; letter-spacing: .25em; color: #d8d8ea; margin: 0 0 1rem; }
+    pre { white-space: pre-wrap; margin: 0; }
+    .ok { color: #7ec97e; } .bad { color: #e0703a; } .key { color: #d8d8ea; }
+</style>
+<h1>HECHIMA SPIKE</h1>
+<pre id="log">starting...</pre>
+
+<!-- Relative, exactly as the console's own build is (vite base: "./"), because
+     the question this page exists to answer is whether that survives being
+     served from a subpath like /fantasy-msx/. -->
+<script src="./vendor/keymap-engine/keymap-engine.js"></script>
+<script src="./vendor/hechima/hechima.js"></script>
+<script>
+// A spike, not a design. Three questions, in the order they would block work:
+//
+//   1. Does fep.feed() take a plain object, or does it need a live DOM event?
+//      The whole determinism story of runtime/keyboard.ts rests on the former:
+//      its KeyEvent is a structural record so headless and browser agree.
+//   2. Do the worker, the wasm and the dictionary load from a subpath, given
+//      that this console is served from sylx.github.io/fantasy-msx/ and vite
+//      is set to base: "./"? EMBEDDING.md's example uses absolute /vendor/...
+//      paths, which would 404 there.
+//   3. What does a cold first load actually cost, in bytes and in seconds?
+//
+// It also dumps show(segments) verbatim, because that is what a Console would
+// have to draw and no amount of reading the .d.ts substitutes for seeing one.
+
+const out = [];
+const line = (text) => { out.push(text); document.getElementById("log").textContent = out.join("\n"); };
+const report = { questions: {} };
+
+/** Keystrokes as plain records - deliberately NOT KeyboardEvents. */
+function tap(key, code) {
+    return { key, code };
+}
+
+/** The shape runtime/keyboard.ts already hands out, renamed to hechima's KeyTap. */
+function fromFantasyMsx(event) {
+    return {
+        key: event.key, code: event.code, repeat: event.repeat,
+        shiftKey: event.shift, ctrlKey: event.ctrl, altKey: event.alt, metaKey: event.meta
+    };
+}
+
+async function main() {
+    report.crossOriginIsolated = window.crossOriginIsolated;
+    report.hechimaVersion = Hechima.version;
+    report.keymapEngineVersion = KeymapEngine.version;
+    report.protocol = Hechima.HECHIMA_PROTOCOL_VERSION;
+    line(`hechima ${Hechima.version} · keymap-engine ${KeymapEngine.version} · protocol ${Hechima.HECHIMA_PROTOCOL_VERSION}`);
+    line(`crossOriginIsolated: ${window.crossOriginIsolated}   (false is the point: no COOP/COEP)`);
+    line(`page: ${location.pathname}`);
+    line("");
+
+    // --- 2. the subpath -----------------------------------------------------
+    //
+    // The worker itself is loaded relative to this page. The wasm and the
+    // dictionary are then named relative to *the worker script*, which the
+    // .d.ts says is how init resolves them - so nothing here is absolute and
+    // nothing needs to know what prefix the site is served under.
+    const worker = new Worker("./vendor/hechima/hechima-worker.js");
+    worker.addEventListener("error", (e) => {
+        // EMBEDDING.md: a worker that 404s makes init() hang silently.
+        line(`<worker failed: ${e.message}>`);
+        report.workerError = String(e.message);
+        finish();
+    });
+
+    let bytes = 0;
+    let total = 0;
+    const conn = Hechima.connectWorker(worker, {
+        maxCands: 9,
+        onProgress: (loaded, all) => {
+            bytes = loaded;
+            total = all;
+            line(`\rdictionary ${(loaded / 1048576).toFixed(1)}MB of ${(all / 1048576).toFixed(1)}MB`);
+        }
+    });
+
+    // --- 3. what a cold load costs ------------------------------------------
+    const started = performance.now();
+    const ready = await conn.init({
+        wasmJs: "../hechima-wasm/hechima-wasm.js",      // relative to the worker
+        dataUrl: "../hechima-wasm/mozc.data"
+    });
+    const elapsed = performance.now() - started;
+
+    report.ready = ready;
+    report.questions.subpath = { ok: true, servedFrom: location.pathname, absolutePathsUsed: false };
+    report.questions.coldLoad = {
+        seconds: +(elapsed / 1000).toFixed(2),
+        dictionaryBytes: bytes,
+        dictionaryTotal: total
+    };
+    line("");
+    line(`ready in ${(elapsed / 1000).toFixed(2)}s · wasm ${ready.version} · features ${JSON.stringify(ready.features)}`);
+    line("");
+
+    // --- 1. what feed() will accept -----------------------------------------
+    const shown = [];
+    const committed = [];
+    const fep = Hechima.createFep({
+        show(segments) { shown.push(structuredClone(segments)); },
+        hide() { shown.push(null); },
+        commit(text) { committed.push(text); },
+        hostKey(name) { report.hostKey = name; },
+        ...conn.callbacks()
+    });
+    fep.setActive(true);
+
+    // Plain objects, one per keystroke. If this works, nothing about the
+    // machine's own keyboard has to change to reach it.
+    const swallowed = [];
+    for (const [key, code] of [["n", "KeyN"], ["i", "KeyI"], ["h", "KeyH"], ["o", "KeyO"],
+                               ["n", "KeyN"], ["g", "KeyG"], ["o", "KeyO"]]) {
+        swallowed.push(fep.feed(tap(key, code)));
+    }
+    report.questions.plainObjectFeed = {
+        accepted: swallowed.every(Boolean),
+        yomi: shown.at(-1)?.map((s) => s.text).join("")
+    };
+    line(`typed "nihongo" as plain objects → ${JSON.stringify(shown.at(-1)?.map((s) => s.text).join(""))}`);
+
+    // Space converts. The result arrives through the worker, so it is a frame
+    // or two later in machine terms - hence the wait.
+    fep.feed(tap(" ", "Space"));
+    await settle(() => shown.at(-1)?.some((s) => s.candidates));
+
+    const segments = shown.at(-1);
+    report.segments = segments;
+    line("");
+    line("show(segments) while converting:");
+    line(JSON.stringify(segments, null, 2));
+
+    // And one struck through the record shape the console already produces.
+    fep.feed(fromFantasyMsx({ key: "Enter", code: "Enter", shift: false, ctrl: false, alt: false, meta: false, repeat: false }));
+    await settle(() => committed.length > 0);
+    report.questions.fantasyMsxKeyEvent = { accepted: committed.length > 0, committed: committed.join("") };
+    line("");
+    line(`committed: ${JSON.stringify(committed.join(""))}   (Enter fed in the console's own KeyEvent shape)`);
+
+    // A second conversion, to see whether the engine is warm now.
+    const warm = performance.now();
+    const again = await conn.convert("かんじ");
+    report.questions.warmConvert = {
+        ms: +(performance.now() - warm).toFixed(1),
+        candidates: again?.[0]?.candidates?.slice(0, 8)
+    };
+    line(`warm convert "かんじ": ${(performance.now() - warm).toFixed(1)}ms → ${JSON.stringify(again?.[0]?.candidates?.slice(0, 6))}`);
+
+    finish();
+}
+
+/** Waits for an asynchronous callback to have landed, or gives up. */
+async function settle(done, limit = 8000) {
+    const until = performance.now() + limit;
+    while (!done() && performance.now() < until) await new Promise((r) => setTimeout(r, 16));
+    return done();
+}
+
+function finish() {
+    window.__spike = report;
+    console.log("SPIKE_REPORT " + JSON.stringify(report));
+}
+
+main().catch((error) => {
+    line(`\nfailed: ${error?.stack ?? error}`);
+    report.failed = String(error?.stack ?? error);
+    finish();
+});
+</script>

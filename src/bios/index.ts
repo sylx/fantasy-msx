@@ -2,7 +2,9 @@
 
 import { createSystem, type System } from "../api/index.js";
 import { Blitter } from "./blitter.js";
+import { Console } from "./console.js";
 import { Graphics } from "./gfx.js";
+import { Ime } from "./ime.js";
 import { Images } from "./image.js";
 import { Raster } from "./raster.js";
 import { Screen } from "./screen.js";
@@ -10,8 +12,14 @@ import { SoundDriver } from "./sound.js";
 import { Sprites } from "./sprites.js";
 import { Typesetter } from "./text.js";
 
+export { VramAtlas, type AtlasOptions, type AtlasStats } from "./atlas.js";
 export { Blitter, COST, type Job } from "./blitter.js";
+export { Console, romFont, type GlyphSource } from "./console.js";
 export { Graphics } from "./gfx.js";
+export {
+    Ime,
+    type ImeCallbacks, type ImeSegment, type ImeSession, type ImeSessionFactory, type KeyTap
+} from "./ime.js";
 export {
     Images,
     type Dither, type DrawOptions, type Fit, type ImageDecoder, type IndexedImage,
@@ -27,6 +35,7 @@ export { Screen, type SpriteTables } from "./screen.js";
 export { Sprites, SPRITE_COUNT, SPRITE_FLAGS, type SpriteState } from "./sprites.js";
 export { CHAR_HEIGHT, CHAR_WIDTH, FONT, glyphOffset } from "./font.js";
 export { SoundDriver } from "./sound.js";
+export { charCells, textCells } from "./width.js";
 export {
     compile, compileTrack, semitoneToHz, MMLError,
     opllVoice, psgVoice, rhythmVoice,
@@ -43,6 +52,10 @@ export interface Bios {
     readonly image: Images;
     /** Text in the host's own fonts, rasterised outside the machine and carried in. */
     readonly text: Typesetter;
+    /** A character grid over the bitmap, for the screens made of text. */
+    readonly console: Console;
+    /** Japanese input. Inert until an engine is attached to it. */
+    readonly ime: Ime;
     /** The queue behind `gfx`. Advanced automatically as the machine runs. */
     readonly blitter: Blitter;
     /** Music and effects, stepped once per frame on the vertical interrupt. */
@@ -67,6 +80,8 @@ export function createBios(system: System = createSystem()): Bios {
         sprites: new Sprites(system.vdp, screen),
         image: new Images(screen, gfx),
         text: new Typesetter(gfx, screen),
+        console: new Console(gfx, screen),
+        ime: new Ime(),
         blitter,
         bgm: new SoundDriver(system.psg, system.opll)
     };

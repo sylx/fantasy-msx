@@ -16,9 +16,11 @@ import { Runtime, type App, type Host } from "./runtime/runtime.js";
 export * from "./api/index.js";
 export * from "./bios/index.js";
 export { BrowserHost, type BrowserHostOptions } from "./host/browser.js";
+export { connectHechima, type HechimaConnection, type HechimaOptions } from "./host/hechima.js";
 export { HeadlessHost } from "./host/headless.js";
 export { AudioMixer, WebAudioOutput } from "./host/audio.js";
 export * from "./runtime/input.js";
+export * from "./runtime/keyboard.js";
 export * from "./runtime/pointer.js";
 export { Runtime, FRAME_RATE, type App, type Context, type DroppedFile, type Host } from "./runtime/runtime.js";
 
