@@ -19,6 +19,7 @@ export { BrowserHost, type BrowserHostOptions } from "./host/browser.js";
 export { HeadlessHost } from "./host/headless.js";
 export { AudioMixer, WebAudioOutput } from "./host/audio.js";
 export * from "./runtime/input.js";
+export * from "./runtime/pointer.js";
 export { Runtime, FRAME_RATE, type App, type Context, type DroppedFile, type Host } from "./runtime/runtime.js";
 
 export interface BootOptions {

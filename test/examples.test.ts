@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { BUTTON, FONT, boot, glyphOffset, type Button, type TextRasteriser } from "../src/index.js";
+import {
+    BUTTON, FONT, MOUSE, OPLL_R, RHYTHM, boot, glyphOffset,
+    type Button, type Runtime, type TextRasteriser
+} from "../src/index.js";
 import { EXAMPLES, findExample } from "../examples/registry.js";
 
 describe("the example registry", () => {
@@ -533,5 +536,251 @@ describe("the HAZE demo", () => {
             expect(line).toBeLessThanOrEqual(STATUS_TOP + 1);
         }
         expect(scrolls.size).toBeGreaterThan(20);
+    });
+});
+
+describe("the LOOM demo", () => {
+    /** Rows of the desk, in the order they are drawn. */
+    const ROW = { PAD: 0, LEAD: 1, BASS: 2, DRUM: 3, ARP: 4, ECHO: 5, HAT: 6 };
+    const rowY = (row: number) => 134 + row * 11 + 5;
+    const LAMP_X = 9;
+    /** A level on a fader, in the pixel that lights that cell and no more. */
+    const faderX = (level: number) => 100 + (level - 1) * 8 + 4;
+
+    async function started(frames = 30) {
+        const { demo } = await import("../examples/loom/demo.js");
+        const runtime = boot();
+        runtime.run(demo);
+        runtime.step(frames);
+        return runtime;
+    }
+
+    function click(runtime: Runtime, x: number, y: number): void {
+        runtime.pointer.setPosition(x, y, true);
+        runtime.pointer.setButton(MOUSE.LEFT, true);
+        runtime.step(1);
+        runtime.pointer.setButton(MOUSE.LEFT, false);
+        runtime.step(1);
+    }
+
+    /**
+     * The roll, read back off the screen as the picture of the phrase it is -
+     * one string per column, so the playhead sweeping through it can be left
+     * out of the comparison.
+     */
+    function roll(runtime: Runtime): string[] {
+        const columns: string[] = [];
+        for (let x = 4; x < 252; ++x) {
+            let column = "";
+            for (let y = 40; y < 130; y += 3) column += runtime.gfx.getPixel(x, y).toString(16);
+            columns.push(column);
+        }
+        return columns;
+    }
+
+    /** How many columns of the roll differ. Two is the playhead in each sample. */
+    function differences(before: string[], after: string[]): number {
+        let count = 0;
+        for (let i = 0; i < before.length; ++i) if (before[i] !== after[i]) ++count;
+        return count;
+    }
+
+    /**
+     * Runs frames, reporting which OPLL channels were keyed on during them.
+     * The demo writes its own registers rather than playing a song, so this is
+     * the only place its notes can be observed.
+     */
+    function keyed(runtime: Runtime, frames: number): Set<number> {
+        const { opll } = runtime.bios.system;
+        const seen = new Set<number>();
+        for (let i = 0; i < frames; ++i) {
+            runtime.step(1);
+            for (let channel = 0; channel < 6; ++channel) {
+                if (opll.read(OPLL_R.BLOCK + channel) & 0x10) seen.add(channel);
+            }
+        }
+        return seen;
+    }
+
+    it("runs in SCREEN 5 with both chips going and the OPLL in rhythm mode", async () => {
+        const runtime = await started();
+
+        expect(runtime.screen.mode.name).toBe("G4");
+        expect(runtime.bios.system.machine.getAudioSignals()).toHaveLength(2);
+        // Rhythm mode trades the last three FM voices for five drums.
+        expect(runtime.bios.system.opll.read(OPLL_R.RHYTHM) & RHYTHM.ENABLE).toBe(RHYTHM.ENABLE);
+        // Nothing is playing a song: the sequencer writes the registers itself.
+        expect(runtime.bgm.playing).toBe(false);
+    });
+
+    it("plays a voice for each note of the chord, and one each for the lead and the bass", async () => {
+        const runtime = await started();
+        const heard = keyed(runtime, 240);
+        // Three for a triad, four when the chord has a seventh on it - which is
+        // why the fourth pad channel is not asked for here.
+        for (const channel of [0, 1, 2, 4, 5]) expect(heard.has(channel)).toBe(true);
+    });
+
+    it("gives the drums a pitch, without which the chip's percussion is silent", async () => {
+        const runtime = await started();
+        const { opll } = runtime.bios.system;
+        for (const channel of [6, 7, 8]) {
+            expect(opll.read(OPLL_R.FNUM_LOW + channel) | (opll.read(OPLL_R.BLOCK + channel) & 1) << 8)
+                .toBeGreaterThan(0);
+        }
+    });
+
+    it("mutes a part where it stands, and lets it back in", async () => {
+        const runtime = await started();
+
+        click(runtime, LAMP_X, rowY(ROW.PAD));
+        const muted = keyed(runtime, 240);
+        expect([...muted].some((channel) => channel <= 3)).toBe(false);
+        expect(muted.has(4)).toBe(true);            // the lead is still going
+
+        click(runtime, LAMP_X, rowY(ROW.PAD));
+        expect([...keyed(runtime, 240)].some((channel) => channel <= 3)).toBe(true);
+    });
+
+    it("writes a fader straight into the chip's attenuation", async () => {
+        const runtime = await started();
+        const { opll } = runtime.bios.system;
+        // The OPLL counts down from loudest, so a level of 4 is an attenuation
+        // of 11 - or 12, since a note off the beat is written a step quieter.
+        const level = () => 15 - (opll.read(OPLL_R.INSTRUMENT + 4) & 0x0f);
+
+        click(runtime, faderX(4), rowY(ROW.LEAD));
+        runtime.step(20);
+        expect(level()).toBeGreaterThanOrEqual(3);
+        expect(level()).toBeLessThanOrEqual(4);
+
+        click(runtime, faderX(15), rowY(ROW.LEAD));
+        runtime.step(20);
+        expect(level()).toBeGreaterThanOrEqual(14);
+    });
+
+    it("drags a fader with the button held, wherever the mouse goes", async () => {
+        const runtime = await started();
+        const { opll } = runtime.bios.system;
+
+        runtime.pointer.setPosition(faderX(10), rowY(ROW.BASS), true);
+        runtime.pointer.setButton(MOUSE.LEFT, true);
+        runtime.step(2);
+        // Off the bottom of the screen, still holding: the drag keeps the fader.
+        runtime.pointer.setPosition(faderX(2), 400, false);
+        runtime.step(40);
+        const quiet = opll.read(OPLL_R.INSTRUMENT + 5) & 0x0f;
+        expect(quiet).toBeGreaterThanOrEqual(13);
+
+        runtime.pointer.setButton(MOUSE.LEFT, false);
+        runtime.step(2);
+        // Let go, and the same place on the screen no longer moves it.
+        runtime.pointer.setPosition(faderX(14), 400, false);
+        runtime.step(40);
+        expect(opll.read(OPLL_R.INSTRUMENT + 5) & 0x0f).toBe(quiet);
+    });
+
+    it("changes an instrument from its cell, one arrow each way", async () => {
+        const runtime = await started();
+        const { opll } = runtime.bios.system;
+        const patch = () => opll.read(OPLL_R.INSTRUMENT + 4) >> 4;
+
+        runtime.step(30);
+        const before = patch();
+        click(runtime, 90, rowY(ROW.LEAD));         // the right-hand arrow
+        runtime.step(30);
+        expect(patch()).toBe((before + 1) % 16);
+
+        click(runtime, 50, rowY(ROW.LEAD));         // and back
+        runtime.step(30);
+        expect(patch()).toBe(before);
+    });
+
+    it("re-rolls the drums for a new groove and leaves the rest of the phrase alone", async () => {
+        const runtime = await started(120);
+        /** The note field alone, above the rule the drum lanes hang under. */
+        const notes = () => roll(runtime).map((column) => column.slice(0, 25));
+        /** And the drum lanes alone. */
+        const drums = () => {
+            let out = "";
+            for (let y = 119; y < 130; ++y) {
+                for (let x = 4; x < 252; ++x) out += runtime.gfx.getPixel(x, y).toString(16);
+            }
+            return out;
+        };
+
+        const before = notes();
+        const beat = drums();
+        click(runtime, 90, rowY(ROW.DRUM));         // the next groove
+        runtime.step(2);
+
+        expect(drums()).not.toBe(beat);
+        expect(differences(before, notes())).toBeLessThanOrEqual(2);
+    });
+
+    it("writes a different phrase on NEW, and draws it", async () => {
+        const runtime = await started(120);
+        const before = roll(runtime);
+
+        click(runtime, 238, 4);
+        runtime.step(2);
+        expect(differences(before, roll(runtime))).toBeGreaterThan(20);
+    });
+
+    it("leaves the phrase alone for as long as it is playing", async () => {
+        const runtime = await started(120);
+        click(runtime, 150, 4);                     // AUTO off
+
+        const before = roll(runtime);
+        runtime.step(600);
+        expect(differences(before, roll(runtime))).toBeLessThanOrEqual(2);
+    });
+
+    it("changes it by itself when it is left to, at the turn of the phrase", async () => {
+        const runtime = await started(120);
+        const before = roll(runtime);
+
+        // A phrase is 128 sixteenths; the opening one is at 96, where that is
+        // 1200 frames. Nothing may change before the end of it.
+        runtime.step(900);
+        expect(differences(before, roll(runtime))).toBeLessThanOrEqual(2);
+        runtime.step(400);
+        expect(differences(before, roll(runtime))).toBeGreaterThan(20);
+    });
+
+    it("puts the cursor under the mouse, and takes it away when the mouse leaves", async () => {
+        const runtime = await started();
+        const { vram } = runtime.bios.system.vdp;
+        const attributes = runtime.screen.spriteTables.attributes;
+
+        runtime.pointer.setPosition(120, 80, true);
+        runtime.step(1);
+        // The VDP draws a sprite one line below its stored Y, and the shadow
+        // is the same arrow a pixel down and across.
+        expect(vram[attributes + 1]).toBe(120);
+        expect(vram[attributes]).toBe(79);
+        expect(vram[attributes + 5]).toBe(121);
+
+        runtime.pointer.setPosition(300, 80, false);
+        runtime.step(1);
+        expect(vram[attributes]).toBeGreaterThan(211);
+    });
+
+    it("works the same desk from a joystick, for a machine with no mouse", async () => {
+        const runtime = await started();
+        const { opll } = runtime.bios.system;
+
+        // Down to the bass, then hold left: the fader sweeps to silence.
+        for (let i = 0; i < 2; ++i) {
+            runtime.input.setButton(BUTTON.DOWN, true);
+            runtime.step(1);
+            runtime.input.setButton(BUTTON.DOWN, false);
+            runtime.step(1);
+        }
+        runtime.input.setButton(BUTTON.LEFT, true);
+        runtime.step(80);
+        runtime.input.setButton(BUTTON.LEFT, false);
+        runtime.step(4);
+        expect(opll.read(OPLL_R.INSTRUMENT + 5) & 0x0f).toBe(15);
     });
 });

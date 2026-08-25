@@ -38,7 +38,7 @@ same position an MSX program's VBlank handler occupies.
 
 | Layer | What it is | Status |
 |-------|-----------|--------|
-| host  | canvas blit, keyboard, gamepads, audio, file drops, 60Hz clock | done |
+| host  | canvas blit, keyboard, gamepads, mouse, audio, file drops, 60Hz clock | done |
 | L0 core | VDP, PSG, OPLL (vendored from WebMSX) | done |
 | L1 API | typed register/VRAM/port access | done |
 | L2 BIOS | drawing and sprites | done |
@@ -322,6 +322,40 @@ was running with it. While a file is over the screen the canvas carries
 `BrowserHost` to have none of it.
 
 
+## The mouse
+
+`ctx.pointer` is where the mouse is, in the machine's own pixels - the ones
+`gfx` draws in, whatever size the canvas happens to be on the page. The host
+undoes the two transforms between them: the CSS scaling of the canvas, and the
+letterboxing `present` applies to fit the picture inside it. The border the VDP
+draws around the active display comes off too, so 0,0 is the top left of the
+screen and not of the signal.
+
+```ts
+update({ pointer, gfx }) {
+    if (pointer.pressed() && pointer.inside) select(pointer.x, pointer.y);
+    if (pointer.down()) fader = pointer.x;               // still held: a drag
+    gfx.now.pixel(pointer.x, pointer.y, 15);
+}
+```
+
+It is latched once a frame like the joystick is, so `pressed` and `released`
+mean "since the last update" no matter how many events the browser delivered in
+between, and `dx` / `dy` are the movement over that frame. `inside` says
+whether the position is on the screen or beside it, and `present` whether a
+pointer has reported at all - a touch screen may never move one, and a cursor
+drawn for a device that has not got one is a lie.
+
+A press captures the pointer, so a drag that leaves the screen keeps being
+delivered until the button comes up. The events are pointer events rather than
+mouse events, which means a finger works as well as a mouse. Pass
+`pointer: false` to `BrowserHost` to bind none of it.
+
+Nothing about this is how an MSX read a mouse - that was two bits of relative
+movement at a time through a joystick port, integrated by the program itself.
+This is the host's own pointer, handed over in the machine's coordinates.
+
+
 ## Examples
 
 ```bash
@@ -443,6 +477,50 @@ rasteriser will use. The display line is queued rather than written, so you
 watch it lay down; everything under it is `drawNow`, since a specimen sheet
 that arrived in instalments would be unreadable while it did.
 
+### LOOM
+
+A composing machine, and a mixing desk to hear it through. There is no MML in
+the demo and no `bgm.play`: the chords come out of a Markov chain over scale
+degrees, the tune is a motif walked across them, and a sequencer of its own
+writes the chips a sixteenth at a time - on the vertical interrupt, which is
+the only clock a music driver on this machine ever had.
+
+Diatonic harmony falls out of one rule: stack thirds on a scale degree by
+taking every other degree of the mode. The qualities look after themselves -
+the chord on the second degree comes out minor in a major key and major in
+dorian without anything in the file knowing that - and the chain that picks the
+degrees is functional harmony written down as a table of weights, with the last
+bar forced to a dominant so the loop leans back into the tonic it began on.
+
+Nine parts, over two chips and the OPLL's rhythm mode:
+
+| part | voices | |
+|------|--------|-|
+| PAD  | OPLL 0-3 | the chord, voice-led so each part moves as little as it can |
+| LEAD | OPLL 4 | a motif, landing on chord tones where the beat is strong |
+| BASS | OPLL 5 | roots, fifths, and a step into the chord that is coming |
+| DRUM | OPLL 6-8 | rhythm mode, which trades three FM voices for five drums |
+| ARP  | PSG A | the chord again, one note at a time |
+| ECHO | PSG B | the lead three steps late and quieter, which is a delay made of notes |
+| HAT  | PSG C | the noise generator |
+
+The desk along the bottom is the chips' own controls rather than a mixer laid
+over them. An OPLL level is the four-bit attenuation that shares a register
+with the instrument number, and the driver rewrites it every frame - so a fader
+moved during a note reaches that note. A PSG level is four bits with no useful
+envelope behind them, so the voices there are what MSX drivers actually did: a
+table of levels, one written per frame, which is where PLUCK and SWELL come
+from. The rhythm channels need a pitch of their own, since the drums are built
+from the same phase generators as the melody voices and a channel left at
+F-number zero never advances.
+
+Everything is drawn with `gfx.now`. A control that has to be under the mouse
+this frame cannot wait for the blitter, and the roll is kept as a byte-a-pixel
+model besides, so the playhead can put back exactly what it swept over. The
+cursor is two sprites - the arrow, and the same arrow a pixel down and across
+in the panel colour, because a sprite is one colour to a line and a white arrow
+over a white fader needs a shadow.
+
 ### HAZE
 
 The other end of the machine. SCREEN 3 is the mode nobody used: 64x48 blocks of
@@ -473,6 +551,7 @@ darkest, lays its bar in that, and writes on it in the brightest.
 npm run play -- out.png     # INK, headless, with a scripted controller
 npm run wire -- out.png     # WIRE, four frames of it
 npm run haze -- out.png     # HAZE, one frame of each of its five patterns
+npm run loom -- out.png     # LOOM, with the desk worked by a scripted mouse
 ```
 
 ## Writing a game

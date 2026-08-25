@@ -3,6 +3,7 @@
 
 import type { Frame } from "../core/machine.js";
 import { BUTTON, type Button, type Input, type Player } from "../runtime/input.js";
+import { MOUSE, type MouseButton, type Pointer } from "../runtime/pointer.js";
 import { FRAME_RATE, type DroppedFile, type Host, type Runtime } from "../runtime/runtime.js";
 import { WebAudioOutput } from "./audio.js";
 
@@ -23,6 +24,27 @@ export interface BrowserHostOptions {
     audio?: boolean;
     /** Accept files dropped on the screen. On by default. */
     drop?: boolean;
+    /** Report the mouse. On by default. */
+    pointer?: boolean;
+}
+
+/**
+ * Where the picture landed on the canvas last frame, which is what turns a
+ * browser's client coordinates back into the machine's own pixels.
+ */
+interface Layout {
+    scale: number;
+    /** Top-left of the drawn picture, in canvas pixels. */
+    x: number;
+    y: number;
+    /** Width of one screen pixel against its height. */
+    aspect: number;
+    /** The border the VDP draws around the active display, in screen pixels. */
+    borderX: number;
+    borderY: number;
+    /** The active display: the coordinates the machine itself draws in. */
+    width: number;
+    height: number;
 }
 
 /** Wraps a browser File as the machine sees it. */
@@ -48,6 +70,9 @@ export class BrowserHost implements Host {
     private readonly options: BrowserHostOptions;
     private input: Input | null = null;
     private audio: WebAudioOutput | null = null;
+    private runtime: Runtime | null = null;
+    /** Null until a frame has been shown and there is somewhere to point at. */
+    private layout: Layout | null = null;
     private raf = 0;
     private previousTime = 0;
     private accumulator = 0;
@@ -66,6 +91,7 @@ export class BrowserHost implements Host {
     attach(runtime: Runtime): void {
         const input = runtime.input;
         this.input = input;
+        this.runtime = runtime;
 
         if (this.options.audio !== false) {
             this.audio = new WebAudioOutput(runtime.bios.system.machine);
@@ -83,6 +109,7 @@ export class BrowserHost implements Host {
         const keyUp = (event: KeyboardEvent) => onKey(event, false);
         const blur = () => {
             input.releaseAll();
+            runtime.pointer.releaseAll();
             this.audio?.flush();
         };
         const gesture = () => void this.audio?.resume();
@@ -99,6 +126,7 @@ export class BrowserHost implements Host {
         });
 
         if (this.options.drop !== false) this.bindDrop(runtime);
+        if (this.options.pointer !== false) this.bindPointer(runtime.pointer);
     }
 
     /**
@@ -164,6 +192,82 @@ export class BrowserHost implements Host {
         });
     }
 
+    /**
+     * The mouse, in the machine's own pixels.
+     *
+     * Two transforms sit between a browser's client coordinates and a screen
+     * pixel: the page scales the canvas with CSS, and `present` scales the
+     * picture to fit inside it. `toScreen` undoes both, and then the VDP's
+     * border, so an app hit-tests in the coordinates it drew in.
+     *
+     * Pointer events rather than mouse events, so a finger works too, and a
+     * press captures the pointer: a fader being dragged goes on following the
+     * mouse after it has left the screen, which a plain `mouseup` on the canvas
+     * would not give.
+     */
+    private bindPointer(pointer: Pointer): void {
+        const canvas = this.canvas;
+
+        const move = (event: PointerEvent) => {
+            const point = this.toScreen(event);
+            if (point) pointer.setPosition(point.x, point.y, point.inside);
+        };
+
+        const down = (event: PointerEvent) => {
+            if (event.button > MOUSE.RIGHT) return;
+            move(event);
+            pointer.setButton(event.button as MouseButton, true);
+            canvas.setPointerCapture?.(event.pointerId);
+            // Keeps a finger dragging a fader from scrolling the page with it.
+            event.preventDefault();
+        };
+
+        const up = (event: PointerEvent) => {
+            if (event.button > MOUSE.RIGHT) return;
+            move(event);
+            pointer.setButton(event.button as MouseButton, false);
+            canvas.releasePointerCapture?.(event.pointerId);
+        };
+
+        // Buttons cannot be seen coming up once the pointer is gone, so a
+        // cancelled or departed pointer lets go of everything it was holding.
+        const cancel = () => pointer.releaseAll();
+        const leave = () => pointer.setPosition(pointer.x, pointer.y, false);
+
+        canvas.addEventListener("pointermove", move);
+        canvas.addEventListener("pointerdown", down);
+        canvas.addEventListener("pointerup", up);
+        canvas.addEventListener("pointercancel", cancel);
+        canvas.addEventListener("pointerleave", leave);
+        this.listeners.push(() => {
+            canvas.removeEventListener("pointermove", move);
+            canvas.removeEventListener("pointerdown", down);
+            canvas.removeEventListener("pointerup", up);
+            canvas.removeEventListener("pointercancel", cancel);
+            canvas.removeEventListener("pointerleave", leave);
+            pointer.releaseAll();
+        });
+    }
+
+    /** Client coordinates to screen pixels. Null until a frame has been shown. */
+    private toScreen(event: { clientX: number; clientY: number }): { x: number; y: number; inside: boolean } | null {
+        const layout = this.layout;
+        if (!layout) return null;
+
+        // A canvas has its own pixel grid and a CSS size that need not match.
+        const rect = this.canvas.getBoundingClientRect?.();
+        const across = rect && rect.width > 0 ? this.canvas.width / rect.width : 1;
+        const down = rect && rect.height > 0 ? this.canvas.height / rect.height : 1;
+        const canvasX = (event.clientX - (rect?.left ?? 0)) * across;
+        const canvasY = (event.clientY - (rect?.top ?? 0)) * down;
+
+        // Out of the letterbox, then out of the border the VDP draws around
+        // the active display - which the machine never draws on.
+        const x = Math.floor((canvasX - layout.x) / (layout.scale * layout.aspect)) - layout.borderX;
+        const y = Math.floor((canvasY - layout.y) / layout.scale) - layout.borderY;
+        return { x, y, inside: x >= 0 && y >= 0 && x < layout.width && y < layout.height };
+    }
+
     present(frame: Frame | null, pixelAspect = 1): void {
         const { width, height } = this.canvas;
         this.context.fillStyle = this.options.background ?? "#000";
@@ -178,14 +282,28 @@ export class BrowserHost implements Host {
             ?? Math.max(1, Math.floor(Math.min(width / trueWidth, height / frame.height)));
         const drawWidth = Math.round(trueWidth * scale);
         const drawHeight = frame.height * scale;
+        const left = ((width - drawWidth) / 2) | 0;
+        const top = ((height - drawHeight) / 2) | 0;
 
         this.context.drawImage(
             // In a browser the VDP renders into a real canvas, which is what this is.
             frame.source as unknown as CanvasImageSource,
             0, 0, frame.width, frame.height,
-            ((width - drawWidth) / 2) | 0, ((height - drawHeight) / 2) | 0,
-            drawWidth, drawHeight
+            left, top, drawWidth, drawHeight
         );
+
+        // Where it landed, so the mouse can be read back into the same pixels.
+        // The frame carries the border with it and the active display sits in
+        // the middle of it, which is where the machine's own origin is.
+        const screen = this.runtime?.bios.screen;
+        const active = { width: screen?.width ?? frame.width, height: screen?.height ?? frame.height };
+        this.layout = {
+            scale, x: left, y: top, aspect: pixelAspect,
+            borderX: (frame.width - active.width) >> 1,
+            borderY: (frame.height - active.height) >> 1,
+            width: active.width,
+            height: active.height
+        };
     }
 
     start(tick: () => void): void {
@@ -216,6 +334,7 @@ export class BrowserHost implements Host {
         this.raf = 0;
         for (const remove of this.listeners) remove();
         this.listeners.length = 0;
+        this.layout = null;
         void this.audio?.stop();
         this.audio = null;
     }

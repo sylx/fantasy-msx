@@ -42,6 +42,13 @@ export const EXAMPLES: readonly Example[] = [
         load: async () => (await import("./type/demo.js")).demo
     },
     {
+        id: "loom",
+        title: "LOOM",
+        summary: "A composing machine. The chords come out of a Markov chain over scale degrees, the tune is a motif walked across them, and a sequencer on the vertical interrupt hands the lot to the chips a sixteenth at a time - four FM voices, the OPLL's rhythm mode, and the PSG doing the arpeggio, the echo and the hi-hat. The desk along the bottom is worked with the mouse: every part has the chip's own level, its own voice and a mute.",
+        controls: "click a part's voice, fader or lamp \u00b7 NEW for another phrase \u00b7 AUTO to let it change on its own \u00b7 click a chord to re-roll that bar \u00b7 arrows and Z / X without a mouse",
+        load: async () => (await import("./loom/demo.js")).demo
+    },
+    {
         id: "haze",
         title: "HAZE",
         summary: "A demo in SCREEN 3, the mode nobody used: 64x48 blocks of 4x4 pixels. The whole picture is 2048 bytes, so every block of it is recomputed every frame, while the palette rotates underneath and R23 scrolls the lot a quarter of a block at a time. The readout is four sprites, which is all a line of SCREEN 3 will show.",

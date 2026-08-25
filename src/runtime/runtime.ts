@@ -14,6 +14,7 @@ import type { Bios } from "../bios/index.js";
 import type { Graphics, Images, Screen, SoundDriver, Sprites, Typesetter } from "../bios/index.js";
 import type { Frame } from "../core/machine.js";
 import { Input } from "./input.js";
+import { Pointer } from "./pointer.js";
 
 /** What the game is handed every frame. */
 export interface Context {
@@ -28,6 +29,11 @@ export interface Context {
     /** Music and effects. Already ticking on the vertical interrupt. */
     readonly bgm: SoundDriver;
     readonly input: Input;
+    /**
+     * The mouse, in screen pixels. Hosts that have no pointing device simply
+     * never move it, and `pointer.present` says which case you are in.
+     */
+    readonly pointer: Pointer;
     /** Frames since the runtime started. */
     readonly frame: number;
     /** Seconds since the runtime started, counted in frames rather than wall clock. */
@@ -90,6 +96,7 @@ export const FRAME_RATE = 60;
 
 export class Runtime implements Context {
     readonly input = new Input();
+    readonly pointer = new Pointer();
     private app: App | null = null;
     private frameCount = 0;
     private running = false;
@@ -177,5 +184,6 @@ export class Runtime implements Context {
         // Latch last: anything the host delivered between frames must still
         // read as newly pressed when the next update looks at it.
         this.input.latch();
+        this.pointer.latch();
     }
 }

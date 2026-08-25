@@ -16,7 +16,13 @@ function element() {
         width: 256,
         height: 212,
         dataset: {} as Record<string, string | undefined>,
+        /** Where the page put the canvas, and at what size CSS is showing it. */
+        rect: { left: 0, top: 0, width: 256, height: 212 },
+        captured: new Set<number>(),
         getContext: () => ({ imageSmoothingEnabled: false, fillRect() {}, drawImage() {} }),
+        getBoundingClientRect() { return this.rect; },
+        setPointerCapture(id: number) { this.captured.add(id); },
+        releasePointerCapture(id: number) { this.captured.delete(id); },
         addEventListener(type: string, handler: Handler) {
             (handlers.get(type) ?? handlers.set(type, new Set()).get(type)!).add(handler);
         },
@@ -32,6 +38,11 @@ function element() {
             return n;
         }
     };
+}
+
+/** A pointer event, as the browser would present it. */
+function pointer(clientX: number, clientY: number, button = 0) {
+    return { clientX, clientY, button, pointerId: 1, preventDefault: vi.fn() };
 }
 
 /** A drag carrying files, as the browser would present it. */
@@ -61,8 +72,8 @@ describe("files dropped on the screen", () => {
         vi.restoreAllMocks();
     });
 
-    function started(app: Pick<App, "drop">, drop?: boolean) {
-        const host = new BrowserHost({ canvas: canvas as never, audio: false, gamepads: false, drop });
+    function started(app: Pick<App, "drop">, options: { drop?: boolean; pointer?: boolean } = {}) {
+        const host = new BrowserHost({ canvas: canvas as never, audio: false, gamepads: false, ...options });
         const runtime = boot({ host });
         runtime.run({ update: () => {}, ...app });
         return { host, runtime };
@@ -139,7 +150,7 @@ describe("files dropped on the screen", () => {
 
     it("binds nothing when the host was told not to", () => {
         const before = canvas.bound;
-        started({}, false);
+        started({}, { drop: false, pointer: false });
         expect(canvas.bound).toBe(before);
     });
 
@@ -152,5 +163,124 @@ describe("files dropped on the screen", () => {
         expect(canvas.bound).toBe(0);
         expect(window.bound).toBe(0);
         expect(canvas.dataset.drop).toBeUndefined();
+    });
+});
+
+describe("the mouse", () => {
+    let canvas: ReturnType<typeof element>;
+    let window: ReturnType<typeof element>;
+    let saved: unknown;
+
+    beforeEach(() => {
+        canvas = element();
+        window = element();
+        saved = globalThis.window;
+        Object.assign(globalThis, { window, requestAnimationFrame: () => 0, cancelAnimationFrame: () => {} });
+    });
+
+    afterEach(() => {
+        Object.assign(globalThis, { window: saved });
+        vi.restoreAllMocks();
+    });
+
+    /**
+     * A running machine with one frame already shown, since it is the frame
+     * that tells the host where the picture landed.
+     *
+     * The canvas here is 256x212 and a frame is 272x228, borders included, so
+     * the host draws it at scale 1 overlapping the edges - which puts screen
+     * pixel 0,0 exactly at client 0,0 and makes the arithmetic below readable.
+     */
+    function started() {
+        const host = new BrowserHost({ canvas: canvas as never, audio: false, gamepads: false });
+        const runtime = boot({ host });
+        runtime.run({ update: () => {} });
+        runtime.step(1);
+        return { host, runtime };
+    }
+
+    it("reports the position in the machine's own pixels", () => {
+        const { runtime } = started();
+
+        canvas.fire("pointermove", pointer(40, 100));
+        expect(runtime.pointer.x).toBe(40);
+        expect(runtime.pointer.y).toBe(100);
+        expect(runtime.pointer.inside).toBe(true);
+        expect(runtime.pointer.present).toBe(true);
+    });
+
+    it("undoes the page's own scaling of the canvas", () => {
+        const { runtime } = started();
+        // The page is showing the canvas at half its pixel size.
+        canvas.rect = { left: 10, top: 20, width: 128, height: 106 };
+
+        canvas.fire("pointermove", pointer(10 + 20, 20 + 50));
+        expect(runtime.pointer.x).toBe(40);
+        expect(runtime.pointer.y).toBe(100);
+    });
+
+    it("says when the pointer is beside the picture rather than on it", () => {
+        const { runtime } = started();
+
+        // The border the VDP draws is part of the frame but not of the screen.
+        canvas.fire("pointermove", pointer(300, 100));
+        expect(runtime.pointer.x).toBe(300);
+        expect(runtime.pointer.inside).toBe(false);
+
+        canvas.fire("pointerleave", {});
+        expect(runtime.pointer.inside).toBe(false);
+    });
+
+    it("latches a press so it reads as new for exactly one frame", () => {
+        const { runtime } = started();
+
+        canvas.fire("pointerdown", pointer(10, 10));
+        expect(runtime.pointer.pressed()).toBe(true);
+        expect(runtime.pointer.down()).toBe(true);
+
+        runtime.step(1);
+        expect(runtime.pointer.pressed()).toBe(false);
+        expect(runtime.pointer.down()).toBe(true);
+
+        canvas.fire("pointerup", pointer(10, 10));
+        expect(runtime.pointer.released()).toBe(true);
+        runtime.step(1);
+        expect(runtime.pointer.released()).toBe(false);
+    });
+
+    it("keeps following a drag that leaves the screen, by capturing the pointer", () => {
+        const { runtime } = started();
+
+        canvas.fire("pointerdown", pointer(100, 100));
+        expect(canvas.captured.has(1)).toBe(true);
+
+        canvas.fire("pointermove", pointer(-40, 300));
+        expect(runtime.pointer.x).toBe(-40);
+        expect(runtime.pointer.down()).toBe(true);
+
+        canvas.fire("pointerup", pointer(-40, 300));
+        expect(canvas.captured.size).toBe(0);
+        expect(runtime.pointer.down()).toBe(false);
+    });
+
+    it("lets go of the buttons when the pointer is taken away", () => {
+        const { runtime } = started();
+
+        canvas.fire("pointerdown", pointer(10, 10));
+        canvas.fire("pointercancel", {});
+        expect(runtime.pointer.down()).toBe(false);
+
+        canvas.fire("pointerdown", pointer(10, 10));
+        window.fire("blur", {});
+        expect(runtime.pointer.down()).toBe(false);
+    });
+
+    it("reports nothing before a frame has been shown, since it cannot yet know where", () => {
+        const host = new BrowserHost({ canvas: canvas as never, audio: false, gamepads: false });
+        const runtime = boot({ host });
+        runtime.run({ update: () => {} });
+
+        canvas.fire("pointermove", pointer(40, 100));
+        expect(runtime.pointer.present).toBe(false);
     });
 });
