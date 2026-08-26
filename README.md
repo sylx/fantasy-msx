@@ -390,17 +390,20 @@ things follow. The joystick keymap goes quiet, so Z and X are letters again.
 And the host stops the page acting on the keys itself - no scrolling on space,
 no going back on backspace - except for anything held with ctrl, alt or the
 platform key, which is left to the browser so its own shortcuts survive being
-typed at.
+typed at. F1 to F4 are swallowed too, which is what leaves an app being typed
+into any commands at all; F5 is deliberately not, because taking a page's reload
+away from someone is worse than being one key short.
 
 Auto-repeat is made here rather than taken from the browser: half a second,
 then thirty a second, counted in frames. A headless run and a browser run
 therefore produce the same keystrokes from the same keys, which is what lets
 `keyboard.type("hello")` stand in for a keyboard in a test.
 
-**Nothing here composes.** There is no preedit and no candidate list, because
-the plan is for kana-kanji conversion to happen inside the machine, where the
-V9938 can draw the candidates in the palette everything else is drawn in and a
-gamepad can pick from them. What a host hands over is keystrokes.
+**Nothing here composes.** There is no preedit and no candidate list at this
+layer, on purpose: what a host hands over is keystrokes, and the conversion
+happens above it in `ctx.ime`, inside the machine, where the V9938 draws the
+candidates in the palette everything else is drawn in and a gamepad could pick
+from them.
 
 ### The console
 
@@ -420,6 +423,8 @@ term.text(0, 25, status, 15, 4);           // addressed: no wrap, no scroll, no 
 term.locate(col, row);
 term.cursorOn = frame % 32 < 20;
 term.flush();                              // and only now does anything reach VRAM
+
+term.measure("日本語");                        // 6 cells in the atlas, 3 in the ROM font
 ```
 
 What makes it a console rather than a loop calling `gfx.text` is the shadow
@@ -427,6 +432,13 @@ buffer. Every cell's character and colours are kept, writes go into that, and
 `flush` paints only the cells that actually changed. An app can therefore
 re-emit its whole visible page every frame and pay for what moved:
 `term.repainted` is the count, and on an idle screen it is zero.
+
+Anything laying text out has to count in cells rather than characters, and to
+ask the console for the count rather than assume it - `term.measure` answers for
+the font it is actually holding, which is two cells for a kanji in the atlas and
+one in the ROM font, where a kanji is a question mark. Writing a cell with what
+it already holds is free, full-width characters included, which is what makes
+re-emitting the page an honest way to draw.
 
 Scrolling is the other half of that bargain. `term.scroll(lines, fromRow,
 rowCount)` moves a band of rows with one VRAM-to-VRAM copy - the cheapest thing
@@ -492,16 +504,39 @@ measures the *ink* - it rasterises a glyph that fills its em square, finds the
 covered pixels, and scales until they fill the cell. `stats.size` is the em it
 settled on, which is rarely the one asked for.
 
+**Unless the face is a bitmap, in which case it decides everything.** A pixel
+font is drawn for exactly one size and scaling it is what ruins it, so `fit:
+false` turns the search off and `style.size` is taken literally. `cellWidth` is
+there for the same reason: a bitmap grid is rarely half its own height.
+
+```ts
+new VramAtlas(vdp, screen, text, {
+    style: { font: "'JF Dot K12x10', monospace", size: 10, stretch: 1 },
+    cellWidth: 6, cellHeight: 12,     // the grid the face was drawn on
+    fit: false, levels: 1             // one size, one coverage level
+});
+```
+
+Two measured facts about that particular face, because they are the sort that
+cost an afternoon. Its full-width advance is **1.2 em** - twelve dots across an
+em ten tall - so the size that gives twelve pixels is 10, not 12. And `stretch`
+has to be 1, which **rules out the 512-wide modes**: their pixels are half as
+wide, so `text` draws the em twice as wide to keep type the right shape, and
+doubling an outline is not doubling a bitmap. A bitmap face cannot spend finer
+pixels on anything; it has one size, and that size wants square ones.
+
 **Two cells for the wide ones.** `charCells` is Unicode's East Asian Width: the
 kana and kanji take two, half-width katakana take one. The console counts in
 cells throughout - the caret cannot land inside a kanji, a wrap moves a whole
 character to the next line, and writing over half of one turns the stranded half
 into a space rather than leaving a fragment.
 
-Sixteen full-width characters to a line is not a layout decision. It is what a
-16x16 glyph leaves of a 256-pixel screen, and it is what Japanese MSX software
-had to work with. SCREEN 7 does not give more of them - its pixels are half as
-wide, so the same sixteen occupy the same width and get twice the detail.
+How many characters fit is arithmetic, not a layout decision. A 16x16 glyph
+leaves room for sixteen to a line of a 256-pixel screen, which is what Japanese
+MSX software had to work with and why it always felt cramped; the 12x12 cell of
+a dot font gives twenty-one, and fits 882 half-width slots in a page against
+512. Small type buys both, which is the other reason a machine this size used
+it.
 
 
 ### Japanese input
@@ -575,7 +610,7 @@ to another project that is explicit about breaking across its own layer
 boundaries. `scripts/fetch-hechima.sh` puts a pinned set (the combination
 hechima's own `VENDOR.md` calls verified) under `public/hechima/`, which vite
 copies into the build; the Pages workflow runs it before building. Without it
-the IME example still loads and says it cannot convert.
+the editor still loads and says it cannot convert.
 
 Paths given to the worker are resolved relative to **the worker script**, not to
 the page, which is what lets the whole thing work under a subpath like
@@ -716,76 +751,69 @@ that arrived in instalments would be unreadable while it did.
 
 ### EDITOR
 
-A text screen with no text mode underneath it. SCREEN 7 is a bitmap, and the
-grid is 85 by 26 cells of the machine's own 6x8 font laid over it - eighty
-columns once the line numbers have theirs, which is what eighty column text on
-an MSX2 was for. The pixels are half as wide as they are tall, so the ROM font
-comes out condensed exactly as an MSX's own 80 column text did.
+A Japanese text editor, with nothing on screen the V9938 did not draw. Three
+things that were once separate demos live in it, because they are one thing: a
+text screen with no text mode underneath it, a font cache in a spare VRAM page
+standing in for the kanji ROM this machine never had, and a conversion engine
+whose candidate list is drawn in cells like everything else.
 
-Type into it. The number worth watching is **LAST EDIT** in the status bar. The
-editor re-emits its whole visible page every frame - twenty-four rows of
-eighty-five cells, unconditionally - and the console touches VRAM only where
-the shadow buffer disagrees. Adding a character to the end of a line is worth
-four cells of the two thousand two hundred and ten: the letter, the cell the
-caret came off, and two digits in the bar saying so. Inserting one in the
-middle is worth the rest of that line, because the rest of that line moved.
+The grid is 42 by 17 - nineteen full-width characters to a line once the line
+numbers have theirs, which is what a Japanese word processor on a machine this
+size looked like, and the reason it looked like that is arithmetic rather than
+taste: 212 lines divided by a twelve-dot cell is seventeen rows and there is no
+more screen.
 
-Scrolling is worth a row rather than a page. Moving the view is handed to
-`console.scroll`, which copies the band of pixels between the two bars within
-VRAM and moves the shadow buffer with it, so only the uncovered row is drawn -
-ninety-odd cells for a line, against all of them for a page.
+Type into it. The number worth watching is **EDIT** in the status bar. The whole
+visible page is re-emitted every frame and only the cells the shadow buffer
+disagrees about reach VRAM: adding a character to the end of a line is worth a
+handful, inserting one in the middle is worth the rest of that line, because the
+rest of that line moved. Scrolling is worth a row rather than a page - the band
+between the bars is moved with one VRAM-to-VRAM copy and only the uncovered row
+is drawn. An idle screen costs nothing at all.
 
-The keyboard is captured, so Z and X are letters and the page stops scrolling
-on space. Keys held with ctrl or the platform key are left to the browser,
-which is why this editor has no shortcuts. What it has not got is Japanese, and
-the shape of that gap is the point: the keyboard carries keystrokes and nothing
-else, and the glyphs come from a ROM that never had them.
+**F1 switches the face, which switches the mode with it.** OUTLINE is the
+default and runs in SCREEN 7, where an outline face gets twice as many columns
+to put the stroke in. DOT is JF Dot K12x10 and runs in SCREEN 5, because it
+cannot do anything else: a bitmap face is drawn for exactly one size on exactly
+one grid, and a mode with finer pixels has nothing to spend them on. So the face
+decides the mode rather than the other way round, and the switch lays the same
+document out on the same 42 by 17 grid either way. One of them is the machine's
+own kind of picture and the other is a photograph of type.
 
+**F2 puts the font page itself on the display.** You are then looking at the
+cache, laid out in the order the characters were first asked for - not a diagram
+of it, the actual memory the text on the other page is copied from. It is dark
+until it is lent a colour, which is the honest part: the page holds coverage
+levels rather than palette indices, so the levels have to borrow exactly the
+entries the text on the other page is drawn in, and give them back afterwards.
 
-### KANJI
+**F3 fetches the dictionary**, which is about 15MB of Mozc and is not fetched
+before it is asked for. What comes back is a preedit and a list of candidates as
+data, so the preedit sits inline where the caret is - the clause being chosen
+inverted, the rest on a colour of their own, as a FEP marked them - and the
+candidate list is the bar along the foot of the screen. It is at the foot rather
+than under the caret because a line is nineteen full-width characters and a
+popup would cover the sentence it is about, which is where Japanese MSX software
+put it for the same reason. **Space** converts and then cycles, **1 to 9** take a
+candidate straight off the bar, **Enter** settles it, and **Ctrl+Space** switches
+between kana and direct.
 
-The font cache, and the page it lives in. **X flips the display to that page**,
-which is the key worth pressing: you are then looking at the font itself, laid
-out in the order the characters were first asked for. Nothing about it is a
-diagram - it is the actual memory the text on the other page is copied from.
-
-It is also dark until it is lent a colour, and that is the honest part. The page
-holds coverage levels rather than palette indices, so a screen pointed straight
-at it is showing entries 1 to 3, which nothing has any reason to have set. The
-demo lends those levels exactly the colours the text on the other page is drawn
-in, and puts them back afterwards.
-
-**Z** turns the antialiasing on, which is the other half of what SCREEN 7 buys
-and costs two registers to have. **Up and down** change the cell size, and both
-numbers in the readout move with it: a smaller cell fits more text on the screen
-*and* more glyphs in the page. **Left and right** change the passage.
+The commands are on function keys because everything else is text: the keyboard
+is captured, so Z and X are letters, and keys held with ctrl or the platform key
+are left to the browser. An MSX had a row of function keys and a row of labels
+for them along the foot of the screen, which is where these are.
 
 ```
-125/512  M74  E0                    16px HARD
+ UNTITLED.TXT *                 173/882 M106
 ```
 
-Slots taken of slots there are, then the times the rasteriser had to be asked
-and the times a character was thrown out to make room. On a page of Japanese the
-first number climbs to a few hundred and stops; on a longer one, `E` starts
-counting.
+Slots taken of slots there are, and the times the host's rasteriser had to be
+asked. On a page of Japanese the first number climbs to a few hundred and stops.
 
-
-### IME
-
-Typing Japanese, with nothing on screen the V9938 did not draw. **Z starts the
-15MB download** - nothing is fetched before that, and the bar that fills while
-it arrives is drawn in cells like everything else.
-
-The preedit sits inline where the caret is: the clause being chosen is inverted,
-the rest are on a colour of their own, which is how a FEP marked them. **The bar
-along the bottom is the candidate list**, and it is at the bottom rather than
-under the caret because a line here is sixteen full-width characters and a popup
-would cover the sentence it is about - which is where Japanese MSX software put
-it, for the same reason.
-
-**Space** converts and then cycles. **1 to 9** take a candidate straight off the
-bar. **Enter** settles it, **Ctrl+Space** switches between kana and direct, and
-everything else types.
+Outside a browser there is nothing to ask for a glyph at all, so it falls back
+to the machine's own 6x8 ROM font and says ROM in the bar. The Japanese comes
+out as question marks - which is exactly what a ROM font has to say about it,
+and the reason the atlas exists.
 
 
 ### LOOM
@@ -980,7 +1008,7 @@ Fixed, and not configurable: **MSX2, V9938, NTSC 60Hz, 128KB VRAM**.
 ```bash
 git submodule update --init      # fetch WebMSX
 npm install
-./scripts/fetch-hechima.sh       # the conversion engine, 21.9MB, for the IME example
+./scripts/fetch-hechima.sh       # the conversion engine, 21.9MB, for the editor
 npm run vendor                   # re-copy the WebMSX core (only after a submodule bump)
 npm test
 npm run dev                      # the example, in a browser
@@ -990,6 +1018,11 @@ npm run play -- out.png          # the example, headless, with scripted input
 
 `src/core/vendor/` is generated. Edit `scripts/vendor.sh`, never the files it
 writes - the copies are verbatim so upstream changes stay reviewable as a diff.
+
+`public/fonts/JF-Dot-k12x10.woff2` is the bitmap face the Japanese examples are
+set in; `examples/fonts.ts` holds the measurements it insists on, the outline
+face it falls back to, and why the choice between them is a choice of screen
+mode.
 
 ## Deploying
 

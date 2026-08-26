@@ -30,7 +30,7 @@ jobs:
       - run: npm test
       # The conversion engine is not vendored - 21.9MB, and it belongs to
       # another project - so it is fetched into public/ before the build copies
-      # it. Without this the IME example still loads and says it cannot.
+      # it. Without this the editor still loads and says it cannot convert.
       - run: ./scripts/fetch-hechima.sh
       - run: npm run build
       # enablement turns Pages on for the repository if it is not already,

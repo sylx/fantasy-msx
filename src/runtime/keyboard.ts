@@ -35,7 +35,12 @@ const MODIFIERS = new Set(["ShiftLeft", "ShiftRight", "ControlLeft", "ControlRig
  * typed into. Printable keys are claimed by their length rather than listed.
  */
 const CLAIMED = new Set(["Enter", "NumpadEnter", "Backspace", "Delete", "Tab", "Space",
-    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown",
+    // An MSX had a row of function keys and its own label for them along the
+    // foot of the screen, which is the one place an app being typed into can
+    // still put a command. F5 is left alone deliberately: taking a page's
+    // reload away from someone is worse than being one key short.
+    "F1", "F2", "F3", "F4"]);
 
 /** One keystroke. The fields a `KeyboardEvent` has, and only those. */
 export interface KeyEvent {

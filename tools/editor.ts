@@ -4,6 +4,11 @@
 // The keystrokes go in through `runtime.keyboard`, the same object a browser
 // host presses keys on. Nothing here is a test double: the repeat clock, the
 // queue and the console's shadow buffer are all the ones the browser drives.
+//
+// What is missing under node is a rasteriser, so the editor falls back to the
+// machine's own ROM font and the Japanese in its sample document comes out as
+// question marks. That is not a defect of this tool - it is what a ROM font has
+// to say about Japanese, and the reason the atlas the browser fills exists.
 
 import { writeFileSync } from "node:fs";
 import { boot } from "../src/index.js";

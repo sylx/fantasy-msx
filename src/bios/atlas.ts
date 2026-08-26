@@ -56,6 +56,20 @@ export interface AtlasOptions {
      * same shape - the trade `text.ts` makes with `stretch`.
      */
     cellHeight?: number;
+    /**
+     * Cell width in pixels, when the default will not do. A bitmap face has a
+     * grid of its own and it is rarely half its height: JF Dot K12x10 is twelve
+     * dots across an em ten tall, so its half-width cell is 6x10 and nothing
+     * derived from the height would find that.
+     */
+    cellWidth?: number;
+    /**
+     * Whether to scale the em until the glyphs fill the cell. On by default,
+     * because an outline face has no size of its own and something has to pick
+     * one. **Turn it off for a bitmap face**: those are drawn for exactly one
+     * size, `style.size` is that size, and a scaled bitmap is a blurred one.
+     */
+    fit?: boolean;
     /** How the glyphs are set. A monospaced family is worth choosing here. */
     style?: TextStyle;
     /** Ink levels stored per pixel: 1 for a hard edge, up to 3 for a flank. Default 1. */
@@ -131,8 +145,9 @@ export class VramAtlas implements GlyphSource {
         this.style = options.style ?? {};
         // A half-width cell keeps its shape rather than its pixel count: half
         // as wide as it is tall, and the 512-wide modes have pixels half as
-        // wide, so it takes twice as many of them to stay that shape.
-        this.width = Math.round(this.height / 2 / screen.pixelAspect);
+        // wide, so it takes twice as many of them to stay that shape. A face
+        // with a grid of its own overrides that.
+        this.width = options.cellWidth ?? Math.round(this.height / 2 / screen.pixelAspect);
         this.layOut();
     }
 
@@ -395,6 +410,14 @@ export class VramAtlas implements GlyphSource {
         let size = asked;
         let ink = this.inkOf(size);
 
+        // A bitmap face is drawn for one size and scaling it is what ruins it,
+        // so the search is skipped entirely and only the baseline is measured.
+        if (this.options.fit === false) {
+            this.size = asked;
+            this.place(ink);
+            return;
+        }
+
         // Three passes: a face whose ink is nothing like its em needs one, and
         // the rounding of the second rarely moves enough to need a third.
         // A pixel is kept back on each axis so that lines of type do not touch:
@@ -412,13 +435,20 @@ export class VramAtlas implements GlyphSource {
         }
 
         this.size = size;
-        // The ink sits in the middle of the cell rather than on a typographic
-        // baseline: in a grid this size the difference is a pixel and the
-        // evenness is worth more than the tradition.
+        this.place(ink);
+    }
+
+    /**
+     * Where the baseline goes, once the size is settled. The ink sits in the
+     * middle of the cell rather than on a typographic baseline: in a grid this
+     * size the difference is a pixel and the evenness is worth more than the
+     * tradition.
+     */
+    private place(ink: { height: number; top: number; baseline: number } | null): void {
         if (ink) {
             this.baseline = ink.baseline + Math.round((this.height - ink.height) / 2) - ink.top;
         } else {
-            const box = this.text.measure("Ay", { ...this.style, size });
+            const box = this.text.measure("Ay", { ...this.style, size: this.size });
             this.baseline = Math.min(box.baseline, this.height - 1);
         }
         if (!(this.baseline > 0)) this.baseline = Math.round(this.height * 0.8);

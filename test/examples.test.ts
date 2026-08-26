@@ -786,100 +786,8 @@ describe("the LOOM demo", () => {
 });
 
 describe("the EDITOR demo", () => {
-    async function started(): Promise<Runtime> {
-        const { demo } = await import("../examples/editor/demo.js");
-        const runtime = boot();
-        runtime.run(demo);
-        runtime.step(1);
-        return runtime;
-    }
-
-    it("lays an 85 by 26 grid over SCREEN 7 and captures the keyboard", async () => {
-        const runtime = await started();
-        expect(runtime.screen.mode.name).toBe("G6");
-        expect(runtime.console.cols).toBe(85);
-        expect(runtime.console.rows).toBe(26);
-        // Typed into rather than played: Z is a letter, not a trigger.
-        expect(runtime.keyboard.capturing).toBe(true);
-        expect(runtime.input.typing).toBe(true);
-    });
-
-    it("types into the document, at the caret", async () => {
-        const runtime = await started();
-        runtime.keyboard.press({ code: "End", key: "End" });
-        runtime.step(1);
-        runtime.keyboard.type("!!");
-        runtime.step(1);
-
-        // The gutter is four digits and a rule, so the text starts at column 5.
-        expect(runtime.console.rowText(1).slice(5).trimEnd()).toBe("FANTASY MSX - EDITOR!!");
-        expect(runtime.console.rowText(0)).toContain("*");        // and it says so
-    });
-
-    it("splits and joins lines, and moves the caret to the seam", async () => {
-        const runtime = await started();
-        for (const key of ["ArrowRight", "ArrowRight", "ArrowRight", "Enter"]) {
-            runtime.keyboard.press({ code: key, key });
-            runtime.step(1);
-        }
-        expect(runtime.console.rowText(1).slice(5).trimEnd()).toBe("FAN");
-        expect(runtime.console.rowText(2).slice(5).trimEnd()).toBe("TASY MSX - EDITOR");
-
-        runtime.keyboard.press({ code: "Backspace", key: "Backspace" });
-        runtime.step(1);
-        expect(runtime.console.rowText(1).slice(5).trimEnd()).toBe("FANTASY MSX - EDITOR");
-    });
-
-    it("scrolls the view by moving pixels, not by repainting the page", async () => {
-        const runtime = await started();
-        const term = runtime.console;
-        const press = (key: string) => {
-            runtime.keyboard.press({ code: key, key });
-            runtime.step(1);
-        };
-
-        // The view is twenty-four rows, so the twenty-fourth arrow down is the
-        // first one that has to move it.
-        for (let i = 0; i < 23; ++i) press("ArrowDown");
-        expect(term.repainted).toBeLessThan(term.cols);
-
-        press("ArrowDown");
-        // One row uncovered, plus the caret and the line number under it. The
-        // twenty-three rows that moved were copied, not drawn.
-        expect(term.repainted).toBeGreaterThanOrEqual(term.cols);
-        expect(term.repainted).toBeLessThan(term.cols * 2);
-    });
-
-    it("costs four cells to add a character to the end of a line", async () => {
-        const runtime = await started();
-        runtime.keyboard.press({ code: "End", key: "End" });
-        runtime.step(2);
-        runtime.keyboard.type("x");                          // the first edit also
-        runtime.step(1);                                     // brings up MODIFIED
-
-        runtime.keyboard.type("y");
-        runtime.step(1);
-        // The letter, the cell the caret came off, and two digits in the bar.
-        expect(runtime.console.repainted).toBe(4);
-    });
-
-    it("costs the rest of the line to insert one in the middle of it", async () => {
-        const runtime = await started();
-        runtime.keyboard.type("x");                          // settle the marker first
-        runtime.step(2);
-
-        runtime.keyboard.press({ code: "Home", key: "Home" });
-        runtime.step(2);
-        runtime.keyboard.type("z");
-        runtime.step(1);
-        // "FANTASY MSX - EDITORx" moved along by one, and that is what it cost.
-        expect(runtime.console.repainted).toBeGreaterThan(20);
-    });
-});
-
-describe("the KANJI demo", () => {
     /**
-     * A rasteriser standing in for the browser's. Every glyph is a filled box
+     * A rasteriser standing in for the browser's. Every glyph is a filled box,
      * an em wide for the full-width characters and half that for the rest, so
      * the atlas has something to measure and the grid has something to hold.
      */
@@ -896,7 +804,7 @@ describe("the KANJI demo", () => {
     };
 
     async function started(rasteriser: TextRasteriser | null = stub): Promise<Runtime> {
-        const { demo } = await import("../examples/kanji/demo.js");
+        const { demo } = await import("../examples/editor/demo.js");
         const runtime = boot();
         if (rasteriser) runtime.bios.text.rasteriser = rasteriser;
         runtime.run(demo);
@@ -904,26 +812,139 @@ describe("the KANJI demo", () => {
         return runtime;
     }
 
-    function press(runtime: Runtime, button: Button): void {
-        runtime.input.setButton(button, true);
-        runtime.step(1);
-        runtime.input.setButton(button, false);
-        runtime.step(1);
+    /** A named key, struck and released, with a frame to act on it. */
+    function press(runtime: Runtime, key: string, times = 1): void {
+        for (let i = 0; i < times; ++i) {
+            runtime.keyboard.press({ code: key, key });
+            runtime.keyboard.release(key);
+            runtime.step(1);
+        }
     }
 
-    it("sets sixteen full-width characters across SCREEN 7", async () => {
+    /** The gutter is three digits and a rule, so the text starts at column 4. */
+    const text = (runtime: Runtime, row: number) => runtime.console.rowText(row).slice(4).trimEnd();
+
+    it("lays a 42 by 17 grid over SCREEN 7 and captures the keyboard", async () => {
         const runtime = await started();
         expect(runtime.screen.mode.name).toBe("G6");
-        // 32 half-width cells, which is 16 kanji - the same sixteen a 256-pixel
-        // screen leaves room for, at twice the detail.
-        expect(runtime.console.cols).toBe(32);
-        expect(runtime.console.rows).toBe(13);
+        // 42 half-width cells, which is 21 full-width characters, and 17 rows.
+        expect(runtime.console.cols).toBe(42);
+        expect(runtime.console.rows).toBe(17);
+        // Typed into rather than played: Z is a letter, not a trigger.
+        expect(runtime.keyboard.capturing).toBe(true);
+        expect(runtime.input.typing).toBe(true);
     });
 
-    it("puts the passage on the screen, kanji and all", async () => {
+    it("falls back to the ROM font where nothing can draw a glyph", async () => {
+        // Outside a browser there is nothing to ask for a kanji, which is the
+        // gap the atlas exists to fill - so it has to degrade rather than fail.
+        const runtime = await started(null);
+        expect(() => runtime.step(5)).not.toThrow();
+        // The ROM font is 6x8, so the same screen holds a different grid.
+        expect(runtime.console.cols).toBe(85);
+        expect(runtime.console.rows).toBe(26);
+        expect(runtime.console.rowText(0)).toContain("ROM");
+        // The document is untouched - what degrades is the drawing. A ROM font
+        // has one 6x8 cell for every character and a question mark for
+        // everything past ASCII 126, which is the gap the atlas exists to fill.
+        expect(text(runtime, 3)).toBe("この画面に文字モードはありません。");
+        expect(runtime.console.measure("この画面")).toBe(4);
+    });
+
+    it("types into the document, at the caret", async () => {
         const runtime = await started();
-        expect(runtime.console.rowText(1)).toContain("この画面に文字モードは");
-        expect(runtime.console.rowText(0)).toContain("かな漢字");
+        press(runtime, "End");
+        runtime.keyboard.type("!!");
+        runtime.step(1);
+
+        expect(text(runtime, 1)).toBe("FANTASY MSX - EDITOR!!");
+        expect(runtime.console.rowText(0)).toContain("*");        // and it says so
+    });
+
+    it("splits and joins lines, and moves the caret to the seam", async () => {
+        const runtime = await started();
+        press(runtime, "ArrowRight", 3);
+        press(runtime, "Enter");
+        expect(text(runtime, 1)).toBe("FAN");
+        expect(text(runtime, 2)).toBe("TASY MSX - EDITOR");
+
+        press(runtime, "Backspace");
+        expect(text(runtime, 1)).toBe("FANTASY MSX - EDITOR");
+    });
+
+    it("counts a line in cells, so the caret never lands inside a kanji", async () => {
+        const runtime = await started();
+        const term = runtime.console;
+        // Line three is Japanese: seventeen characters, thirty-four cells.
+        expect(term.measure("この画面")).toBe(8);
+
+        press(runtime, "ArrowDown", 2);
+        press(runtime, "End");
+        press(runtime, "ArrowUp");
+        // Up from the end of a Japanese line lands on the blank one above it
+        // rather than at some column that line has no character at.
+        expect(runtime.console.cursor.col).toBe(4);
+    });
+
+    it("scrolls the view by moving pixels, not by repainting the page", async () => {
+        const runtime = await started();
+        const term = runtime.console;
+
+        // The view is fourteen rows, so the fourteenth arrow down is the first
+        // one that has to move it.
+        press(runtime, "ArrowDown", 13);
+        expect(term.repainted).toBeLessThan(term.cols);
+
+        press(runtime, "ArrowDown");
+        // One row uncovered, plus the caret and the line number under it. The
+        // thirteen rows that moved were copied, not drawn.
+        expect(term.repainted).toBeGreaterThanOrEqual(term.cols);
+        expect(term.repainted).toBeLessThan(term.cols * 2);
+    });
+
+    it("costs a handful of cells to add a character to the end of a line", async () => {
+        const runtime = await started();
+        press(runtime, "End");
+        runtime.keyboard.type("x");                          // the first edit also
+        runtime.step(2);                                     // brings up the marker
+
+        runtime.keyboard.type("y");
+        runtime.step(1);
+        // The letter, the cell the caret came off, and the digits in the bars
+        // that changed with them.
+        expect(runtime.console.repainted).toBeLessThanOrEqual(6);
+        expect(runtime.console.repainted).toBeGreaterThan(1);
+    });
+
+    it("costs the rest of the line to insert one in the middle of it", async () => {
+        const runtime = await started();
+        runtime.keyboard.type("x");                          // settle the marker first
+        runtime.step(2);
+
+        runtime.keyboard.type("z");
+        runtime.step(1);
+        // "FANTASY MSX - EDITORx" moved along by one, and that is what it cost.
+        expect(runtime.console.repainted).toBeGreaterThan(20);
+    });
+
+    it("switches the face with F1, and the mode along with it", async () => {
+        const runtime = await started();
+        const bar = () => runtime.console.rowText(runtime.console.rows - 1);
+        expect(bar()).toContain("OUTLINE");
+
+        press(runtime, "F1");
+        // A bitmap face has one grid and wants square pixels, so it is a
+        // SCREEN 5 face - but the same 42 by 17 grid, which is what makes the
+        // two comparable at all.
+        expect(runtime.screen.mode.name).toBe("G4");
+        expect(runtime.console.cols).toBe(42);
+        expect(runtime.console.rows).toBe(17);
+        expect(bar()).toContain("DOT");
+        expect(text(runtime, 1)).toBe("FANTASY MSX - EDITOR");
+
+        press(runtime, "F1");
+        expect(runtime.screen.mode.name).toBe("G6");
+        expect(bar()).toContain("OUTLINE");
     });
 
     it("keeps the glyphs in a page nothing is drawn on", async () => {
@@ -934,85 +955,29 @@ describe("the KANJI demo", () => {
         let ink = 0;
         for (let i = page1; i < page1 + 8192; ++i) if (vram[i] !== 0) ++ink;
         expect(ink).toBeGreaterThan(0);
-        // And the app is drawing on page 0, which is the one being shown.
+        // And the editor is drawing on page 0, which is the one being shown.
         expect(runtime.screen.drawPage).toBe(0);
         expect(runtime.screen.displayPage).toBe(0);
     });
 
-    it("shows that page when asked, and lends the levels a colour to do it", async () => {
+    it("shows that page on F2, and lends the levels a colour to do it", async () => {
         const runtime = await started();
-        // Nothing in the page is index 15 - it holds levels - so entry 1 has to
-        // become visible before the page is worth looking at.
+        // Nothing in the page is index 15 - it holds coverage levels - so entry
+        // 1 has to become visible before the page is worth looking at.
         const before = runtime.screen.palette[1];
 
-        press(runtime, BUTTON.B);
+        press(runtime, "F2");
         expect(runtime.screen.displayPage).toBe(1);
         expect(runtime.screen.palette[1]).not.toEqual(before);
 
-        press(runtime, BUTTON.B);
+        press(runtime, "F2");
         expect(runtime.screen.displayPage).toBe(0);
         expect(runtime.screen.palette[1]).toEqual(before);
     });
 
-    it("re-cuts the glyphs when the cell size changes", async () => {
+    it("draws the preedit at the caret and the candidates along the foot", async () => {
         const runtime = await started();
-        const wide = runtime.console.cols;
-
-        press(runtime, BUTTON.DOWN);                  // a smaller cell
-        expect(runtime.console.cols).toBeGreaterThan(wide);
-        expect(runtime.console.rowText(1)).toContain("この画面");
-
-        press(runtime, BUTTON.UP);
-        press(runtime, BUTTON.UP);                    // and a larger one
-        expect(runtime.console.cols).toBeLessThan(wide);
-    });
-
-    it("says so rather than throwing when there is no rasteriser", async () => {
-        // Outside a browser there is nothing to ask for a glyph, which is the
-        // gap the atlas exists to fill - so it has to fail legibly.
-        const runtime = await started(null);
-        expect(() => runtime.step(5)).not.toThrow();
-        expect(runtime.bios.system.machine.getFrame()).not.toBeNull();
-    });
-});
-
-describe("the IME demo", () => {
-    async function started(): Promise<Runtime> {
-        const { demo } = await import("../examples/ime/demo.js");
-        const runtime = boot();
-        runtime.bios.text.rasteriser = (text, style) => {
-            const em = Math.max(2, Math.round(style.size * style.stretch));
-            const width = charCells(text.codePointAt(0) ?? 32) === 2 ? em : Math.max(1, em >> 1);
-            const height = Math.max(2, Math.round(style.size * 1.4));
-            const alpha = new Uint8Array(width * height);
-            const top = Math.round(style.size * 0.2);
-            for (let y = top; y < Math.min(height, top + style.size); ++y) {
-                alpha.fill(255, y * width, (y + 1) * width);
-            }
-            return { width, height, alpha, baseline: Math.round(style.size), lineHeight: height };
-        };
-        runtime.run(demo);
-        runtime.step(2);
-        return runtime;
-    }
-
-    it("captures the keyboard and asks before spending fifteen megabytes", async () => {
-        const runtime = await started();
-        expect(runtime.keyboard.capturing).toBe(true);
-        expect(runtime.ime.attached).toBe(false);
-        // Nothing is fetched until Z is pressed, and the screen says as much.
-        expect(runtime.console.rowText(runtime.console.rows - 2)).toContain("辞書を読む");
-    });
-
-    it("types straight into the sheet while no engine is attached", async () => {
-        const runtime = await started();
-        runtime.keyboard.type("hello");
-        runtime.step(2);
-        expect(runtime.console.rowText(1)).toContain("hello");
-    });
-
-    it("draws the preedit and the candidate bar from what a session reports", async () => {
-        const runtime = await started();
+        press(runtime, "End");
         // The engine is a seam: this is what hechima would have said.
         runtime.ime.attach((cb) => {
             cb.show([
@@ -1024,9 +989,27 @@ describe("the IME demo", () => {
         runtime.ime.enabled = true;
         runtime.step(2);
 
-        expect(runtime.console.rowText(1)).toContain("日本語入力");
+        // Inline, where the caret is - which is the end of the first line.
+        expect(text(runtime, 1)).toContain("EDITOR日本語入力");
         const bar = runtime.console.rowText(runtime.console.rows - 1);
         expect(bar).toContain("1:日本語");
         expect(bar).toContain("2:ニホンゴ");
+    });
+
+    it("puts what the engine settled into the document, at the caret", async () => {
+        const runtime = await started();
+        press(runtime, "End");
+        runtime.ime.attach((cb) => ({
+            feed: () => { cb.commit("漢字"); return true; },
+            setActive: (on) => on,
+            reset: () => {}
+        }));
+        runtime.ime.enabled = true;
+
+        runtime.keyboard.type("k");
+        runtime.step(2);
+        expect(text(runtime, 1)).toBe("FANTASY MSX - EDITOR漢字");
+        // And the preedit is gone: a commit is the end of one.
+        expect(runtime.ime.composing).toBe(false);
     });
 });

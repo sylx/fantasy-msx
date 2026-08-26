@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boot, createBios, Console, type Bios } from "../src/index.js";
+import { boot, createBios, Console, type Bios, type GlyphSource } from "../src/index.js";
 
 function bios(mode: "G4" | "G6" = "G4"): Bios {
     const built = createBios();
@@ -18,6 +18,23 @@ function inkIn({ console: term, gfx }: Bios, col: number, row: number, backgroun
         }
     }
     return n;
+}
+
+/**
+ * A font with full-width characters in it, which the ROM font has not got: two
+ * cells for anything past U+3000, one for the rest. Everything the grid does
+ * about kanji it does through `cells`, so this is enough to test it with.
+ */
+function wideFont(): GlyphSource {
+    return {
+        cellWidth: 8,
+        cellHeight: 8,
+        cells: (code) => (code >= 0x3000 ? 2 : 1),
+        draw(raster, x, y, code, foreground, background) {
+            const width = 8 * (code >= 0x3000 ? 2 : 1);
+            raster.fillRect(x, y, width, 8, code === 32 ? background : foreground);
+        }
+    };
 }
 
 describe("Console", () => {
@@ -99,6 +116,42 @@ describe("Console", () => {
         term.text(0, 0, "SANE");
         term.flush();
         expect(term.repainted).toBe(1);
+    });
+
+    it("counts a string in the cells the font it is holding actually uses", () => {
+        const term = bios("G4").console;
+        // The ROM font has one 6x8 cell for everything, kanji included - it
+        // draws a question mark for them, and a question mark is one cell.
+        expect(term.measure("AB")).toBe(2);
+        expect(term.measure("\u65e5\u672c")).toBe(2);
+
+        term.setFont(wideFont());
+        expect(term.measure("\u65e5\u672c")).toBe(4);
+        expect(term.measure("A\u65e5")).toBe(3);
+    });
+
+    it("costs nothing to re-emit a full-width character where it already is", () => {
+        // The trap: placing a two-cell character clears whatever it would
+        // strand, and what it strands when it is rewritten in place is its own
+        // second half. Without noticing that, a page re-emitted every frame
+        // paid for every kanji on it, every frame, for no change at all.
+        const term = bios("G4").console;
+        term.setFont(wideFont());
+        term.flush();
+
+        term.text(0, 0, "\u65e5\u672c\u8a9e");
+        term.flush();
+        const settled = term.repainted;
+        expect(settled).toBeGreaterThan(0);
+
+        term.text(0, 0, "\u65e5\u672c\u8a9e");
+        term.flush();
+        expect(term.repainted).toBe(0);
+
+        // One character changed is still only that character.
+        term.text(0, 0, "\u65e5\u672c\u8a9e\u5165");
+        term.flush();
+        expect(term.repainted).toBeLessThan(settled);
     });
 
     it("costs one cell a phase to blink a cursor, and nothing to hold it still", () => {

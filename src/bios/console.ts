@@ -149,6 +149,21 @@ export class Console {
     }
 
     /**
+     * Cells a string occupies in the font this console is holding.
+     *
+     * Which is not something an app can work out for itself: `textCells` knows
+     * that a kanji is two cells wide *in a font that has kanji*, and the ROM
+     * font has none - it draws a question mark in one cell and the layout has
+     * to agree with it. Anything that positions a caret, wraps a line or fills
+     * to the right edge has to count in these.
+     */
+    measure(text: string): number {
+        let cells = 0;
+        for (const character of text) cells += this.font.cells(character.codePointAt(0) ?? SPACE);
+        return cells;
+    }
+
+    /**
      * Where a cell sits on the screen. The grid is centred in whatever the
      * cell size does not divide, so this is also the only honest way for
      * anything drawn with `gfx` to line up with the characters.
@@ -400,6 +415,16 @@ export class Console {
         if (width === 2 && (cell % this.columns) === this.columns - 1) {
             // No room for the second half; a space is the honest answer.
             return this.place(cell, SPACE, attr);
+        }
+
+        // Writing a cell with what it already holds is not a change, and must
+        // not be turned into one. Stranding below would blank the half this
+        // very character is about to rewrite, marking it stale for nothing -
+        // and a page re-emitted every frame would then pay for every kanji on
+        // it, which is the whole cost this buffer exists to avoid.
+        if (this.chars[cell] === code && this.attrs[cell] === attr
+            && (width === 1 || (this.chars[cell + 1] === TRAIL && this.attrs[cell + 1] === attr))) {
+            return;
         }
 
         for (let i = 0; i < width; ++i) this.strand(cell + i);
