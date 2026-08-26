@@ -1017,6 +1017,17 @@ fixed rectangle so that filling it repaints its inside rather than putting the
 artwork back under itself every few characters. Escape puts the balloon away,
 and the picture is drawn again from the reduced copy still in memory.
 
+The box holds six lines of Japanese or eight of the ROM font, and she is asked
+for less than that - but a model is not a contract. So the answer is wrapped
+whole and the balloon looks at a page of it, with a blinking arrow in the
+padding under the last line to say there is another: exactly the mark a machine
+of this vintage put there and exactly what it meant. **Up** and **down** walk it
+a line at a time and **PageUp** / **PageDown** a box at a time, which is also
+why those keys are not bound to the field - a field of one line has nowhere to
+move a caret vertically. The scroll deliberately holds still while the answer
+streams in, since an answer that shoved itself upwards as it was written would
+be unreadable.
+
 **She remembers nothing.** Every question goes to a `clone` of a session
 holding the persona and no conversation at all: partly the built-in model's
 small context, and mostly the right amount of memory for a game of this kind.

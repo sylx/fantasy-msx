@@ -103,7 +103,22 @@
 //   Space        convert, then next candidate
 //   1..9         take that candidate off the bar
 //   Enter        send the line, and Emmy answers
+//   up / down    read the rest of a long answer, a line or a page at a time
 //   Escape       throw the reading away, or put the balloon away
+//
+// ## An answer longer than the balloon
+//
+// The box holds six lines of Japanese or eight of the ROM font, and she is
+// asked for less than that - but a model is not a contract, so sometimes she
+// says more. Nothing is thrown away: the answer is wrapped whole and the
+// balloon looks at a page of it, with a blinking arrow in the padding under the
+// last line to say there is another - which is exactly the mark a machine of
+// this vintage put there and exactly what it meant. Up and down walk it a line
+// at a time, PageUp and PageDown a box at a time.
+//
+// The scroll deliberately stays where it is while the answer streams in. An
+// answer that shoved itself upwards as it was written would be unreadable, so a
+// long one fills the box, stops, and lights the arrow.
 //
 // ## Without a rasteriser
 //
@@ -203,6 +218,19 @@ const TAIL_Y = 88;
  */
 const REPLY_SIZE = 12;
 const REPLY_LEADING = 14;
+/** The same, for the ROM font, whose glyphs are eight rows and not twelve. */
+const ROM_LEADING = 10;
+
+/**
+ * The two arrows that say there is more of her answer than the balloon holds,
+ * in the padding above the first line and below the last.
+ *
+ * Ten pixels across and five down, which in a 512-wide mode is very nearly a
+ * square: its pixels are half as wide as they are tall, so an arrow drawn twice
+ * as wide as it is deep comes out looking like one.
+ */
+const MARKER = 10;
+const MARKER_DEPTH = 5;
 
 // --- Music --------------------------------------------------------------------
 
@@ -344,6 +372,18 @@ const mind = new Mind();
 let wanted: string | null = null;
 let shown: string | null = null;
 
+/**
+ * Her answer wrapped to the balloon, the line of it at the top of the box, and
+ * the line the box was last painted from.
+ *
+ * The wrap is kept rather than redone because scrolling does not change it:
+ * moving the balloon down its own answer is a number changing, and the words
+ * were laid out once when she said them.
+ */
+let paged: string[] = [];
+let scroll = 0;
+let painted = -1;
+
 export const demo: App = {
     init(ctx: Context) {
         language = null;
@@ -361,6 +401,9 @@ export const demo: App = {
         art = null;
         wanted = null;
         shown = null;
+        paged = [];
+        scroll = 0;
+        painted = -1;
 
         dress(ctx);
 
@@ -700,8 +743,16 @@ function edit(event: KeyEvent): void {
 
         case "ArrowLeft": caret = Math.max(0, caret - 1); return;
         case "ArrowRight": caret = Math.min(line.length, caret + 1); return;
-        case "Home": case "ArrowUp": caret = 0; return;
-        case "End": case "ArrowDown": caret = line.length; return;
+        case "Home": caret = 0; return;
+        case "End": caret = line.length; return;
+
+        // Up and down belong to the balloon rather than to the field. A field
+        // of one line has nowhere to move a caret vertically, and the balloon
+        // is the only thing on screen holding more of itself than it shows.
+        case "ArrowUp": return browse(-1);
+        case "ArrowDown": return browse(1);
+        case "PageUp": return browse(-rows());
+        case "PageDown": return browse(rows());
         // Nothing is composing or the engine would have taken this, so it means
         // the other thing on screen that can be dismissed: put the balloon away
         // and have the picture back.
@@ -753,33 +804,37 @@ async function think(question: string): Promise<void> {
     // interleave, and the balloon has no way to show that they had.
     if (mind.state === "thinking") return;
 
-    if (mind.state === "unsupported") {
-        wanted = labels().saysNoModel(mind.note);
-        return;
-    }
-    if (mind.state === "absent") {
-        wanted = labels().saysAsleep;
-        return;
-    }
-    if (mind.state === "fetching") {
-        wanted = labels().saysWaking;
-        return;
-    }
+    if (mind.state === "unsupported") return say(labels().saysNoModel(mind.note));
+    if (mind.state === "absent") return say(labels().saysAsleep);
+    if (mind.state === "fetching") return say(labels().saysWaking);
 
     // The balloon opens empty, so the machine is visibly holding the question
     // rather than having swallowed it. What goes in it until she answers is
     // three dots that move.
-    wanted = "";
+    say("");
 
     // A no-op once the session exists; the first send is what makes it.
     await mind.wake();
-    if (mind.state === "failed") {
-        wanted = `（${mind.note}）`;
-        return;
-    }
+    if (mind.state === "failed") return say(`（${mind.note}）`);
+
     // Streamed, so the balloon fills a few characters at a time - which is what
-    // this machine looked like doing anything.
+    // this machine looked like doing anything. The scroll is deliberately left
+    // where it is as the answer grows: an answer that shoved itself upwards
+    // while it was being written would be unreadable, so a long one fills the
+    // box, stops, and lights the arrow at the bottom.
     await mind.ask(question, (reply) => { wanted = reply; });
+}
+
+/**
+ * Puts something in the balloon and starts it at the top.
+ *
+ * Every fresh thing she says goes through here. The streaming callback above is
+ * the one exception, and it is an exception because it is not a fresh thing -
+ * it is more of the same one.
+ */
+function say(text: string): void {
+    wanted = text;
+    scroll = 0;
 }
 
 /** Scrolls the field the least it can to keep the caret inside it. */
@@ -832,6 +887,9 @@ function balloon(ctx: Context): void {
     if (wanted === null) {
         if (shown !== null) restore(ctx);
         shown = null;
+        paged = [];
+        scroll = 0;
+        painted = -1;
         return;
     }
 
@@ -839,10 +897,55 @@ function balloon(ctx: Context): void {
     // Thinking, and nothing said yet: three dots that move, which is the whole
     // of this machine's idea of an hourglass.
     const text = wanted === "" ? "・".repeat(1 + ((ctx.frame >> 4) % 3)) : wanted;
-    if (text === shown) return;
 
-    words(ctx, text);
-    shown = text;
+    if (text !== shown) {
+        // Wrapped once, when what she is saying changes, and read from
+        // afterwards - the scroll keys move a number rather than the words.
+        paged = layout(ctx, text);
+        shown = text;
+        painted = -1;
+    }
+
+    // An answer that has been rewritten shorter can leave the balloon looking
+    // past the end of it, which is where the eye would be with nothing under it.
+    const top = Math.min(scroll, deepest());
+    if (top !== scroll) {
+        scroll = top;
+        painted = -1;
+    }
+
+    if (scroll !== painted) {
+        words(ctx);
+        painted = scroll;
+    }
+    markers(ctx);
+}
+
+/** How many lines of her answer the balloon holds at once. */
+function rows(): number {
+    return Math.max(1, Math.floor((BALLOON_H - BALLOON_PAD * 2) / leading()));
+}
+
+/** Baseline to baseline: the ROM font is a smaller thing than the atlas. */
+function leading(): number {
+    return rasteriser === false ? ROM_LEADING : REPLY_LEADING;
+}
+
+/** The furthest down the answer the balloon may be scrolled. */
+function deepest(): number {
+    return Math.max(0, paged.length - rows());
+}
+
+/**
+ * Moves the balloon down its own answer, and says whether it moved.
+ *
+ * There is nowhere else the arrows could sensibly go. The field is one line, so
+ * up and down mean nothing in it - Home and End are what a caret wants - and
+ * the only other thing on screen with more of itself than it is showing is
+ * this.
+ */
+function browse(lines: number): void {
+    scroll = Math.max(0, Math.min(scroll + lines, deepest()));
 }
 
 /** The picture again, over whatever was standing on it. */
@@ -881,33 +984,79 @@ function frame(ctx: Context): void {
     gfx.now.vline(right - 1, TAIL_Y - TAIL_DEPTH + 1, TAIL_DEPTH * 2 - 1, FLANK);
 }
 
-/** The words inside it, wrapped to the box and cut to the lines that fit. */
-function words(ctx: Context, text: string): void {
-    const { gfx, text: type } = ctx;
+/**
+ * Her answer wrapped to the balloon, whole - however many lines that comes to.
+ *
+ * Nothing is thrown away here. What does not fit is what the scroll is for, and
+ * a wrap that cut the tail off would leave nothing for the arrows to reach.
+ */
+function layout(ctx: Context, text: string): string[] {
     const width = BALLOON_W - BALLOON_PAD * 2;
-
-    // Only the inside is blanked. The border and the tail are the same as they
-    // were, and repainting them would make the balloon flicker as it fills.
-    gfx.now.fillRect(BALLOON_X + 1, BALLOON_Y + 1, BALLOON_W - 2, BALLOON_H - 2, FLANK);
 
     // Nothing to set type with, so the machine's own font says what it can -
     // which of Japanese is a row of question marks. Asking the typesetter
     // anyway would throw, and a balloon is not worth taking the screen down for.
+    if (!rasteriser) return fold(text, Math.floor(width / 6));
+
+    return wrap(ctx.text, text, replyStyle(), width);
+}
+
+function replyStyle(): TextStyle {
+    return { ...outlineStyle(REPLY_SIZE), lineHeight: REPLY_LEADING, shades: [FLANK, MID, INK] };
+}
+
+/** The page of it the balloon is looking at, from `scroll` down. */
+function words(ctx: Context): void {
+    const { gfx, text: type } = ctx;
+    const page = paged.slice(scroll, scroll + rows());
+
+    // Only the inside is blanked. The border and the tail are the same as they
+    // were, and repainting them would make the balloon flicker as it fills.
+    gfx.now.fillRect(BALLOON_X + 1, BALLOON_Y + 1, BALLOON_W - 2, BALLOON_H - 2, FLANK);
+    if (page.length === 0) return;
+
     if (!rasteriser) {
-        const lines = fold(text, Math.floor(width / 6));
-        for (let i = 0; i < lines.length && i * 10 + 8 <= BALLOON_H - BALLOON_PAD * 2; ++i) {
-            gfx.now.text(BALLOON_X + BALLOON_PAD, BALLOON_Y + BALLOON_PAD + i * 10, lines[i], INK, FLANK);
+        for (const [i, line] of page.entries()) {
+            gfx.now.text(BALLOON_X + BALLOON_PAD, BALLOON_Y + BALLOON_PAD + i * ROM_LEADING, line, INK, FLANK);
         }
         return;
     }
+    type.drawNow(BALLOON_X + BALLOON_PAD, BALLOON_Y + BALLOON_PAD, page.join("\n"), replyStyle());
+}
 
-    const style: TextStyle = {
-        ...outlineStyle(REPLY_SIZE), lineHeight: REPLY_LEADING, shades: [FLANK, MID, INK]
-    };
-    const rows = Math.floor((BALLOON_H - BALLOON_PAD * 2) / REPLY_LEADING);
-    const lines = wrap(type, text, style, width).slice(0, rows);
-    if (lines.length > 0) {
-        type.drawNow(BALLOON_X + BALLOON_PAD, BALLOON_Y + BALLOON_PAD, lines.join("\n"), style);
+/**
+ * The two arrows that say there is more of her answer than this.
+ *
+ * They live inside the balloon rather than on its border, in the strip of
+ * padding above the first line and below the last, because a marker that hung
+ * outside the box would be standing on the picture - and taking it away again
+ * would mean putting the picture back for the sake of five pixels.
+ *
+ * The lower one blinks, which is what a machine of this vintage did to say
+ * there was another page and it was waiting for you.
+ */
+function markers(ctx: Context): void {
+    const x = BALLOON_X + BALLOON_W - BALLOON_PAD - MARKER / 2;
+    arrow(ctx, x, BALLOON_Y + 2, false, scroll > 0);
+    arrow(ctx, x, BALLOON_Y + BALLOON_H - 2 - MARKER_DEPTH, true,
+        scroll < deepest() && ctx.frame % 40 < 26);
+}
+
+/**
+ * One of them, or the balloon's own paper where it is not wanted.
+ *
+ * Blanked and redrawn every frame rather than tracked, which is thirty pixels
+ * and cannot flicker: `gfx.now` writes into VRAM between two frames, so the
+ * raster never sees the half of it that was there in between.
+ */
+function arrow(ctx: Context, x: number, y: number, down: boolean, lit: boolean): void {
+    const { gfx } = ctx;
+    gfx.now.fillRect(x - MARKER / 2, y, MARKER + 1, MARKER_DEPTH, FLANK);
+    if (!lit) return;
+
+    for (let i = 0; i < MARKER_DEPTH; ++i) {
+        const half = Math.round((MARKER / 2) * (1 - i / MARKER_DEPTH));
+        gfx.now.fillRect(x - half, down ? y + i : y + MARKER_DEPTH - 1 - i, half * 2 + 1, 1, GLOW);
     }
 }
 
