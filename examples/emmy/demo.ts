@@ -76,8 +76,28 @@
 // consent to fetch one. F1 is that key, and where the model is on the machine
 // already it costs a session and no download at all.
 //
+// ## Two languages, and one of them chosen first
+//
+// The first thing on screen is a menu of two, each named in its own language,
+// because a chooser that had to be read in a third one would be no chooser at
+// all. Everything after it comes out of a table with two columns - the labels,
+// the bar, what she says when she cannot answer, and her persona - and the
+// wrapping in the balloon does both: a run of Latin comes out whole or not at
+// all, and Japanese breaks where Japanese breaks.
+//
+// The choice is also asked of the browser. What she may answer in is declared
+// as `expectedOutputs`, and that is part of what `availability` answers - a
+// machine with the model for one of them has not necessarily got the other -
+// which is why nothing is asked about the model until this is settled.
+//
+// Where there is no rasteriser the menu does not appear. The ROM font stops at
+// ASCII 126, so Japanese labels there would be rows of question marks: English
+// is not a default in that case, it is the only thing the machine can honestly
+// draw.
+//
 // ## The keys
 //
+//   1 / 2        the language, at the start - or the arrows and Enter
 //   F1           wake her - the browser's model, fetched if it is not here
 //   Ctrl+Space   the dictionary, then kana / direct
 //   Space        convert, then next candidate
@@ -88,10 +108,9 @@
 // ## Without a rasteriser
 //
 // Outside a browser there is nothing to ask for a glyph or for a picture, so
-// this falls back to the machine's own 6x8 ROM font and says so. The Japanese
-// comes out as question marks, which is exactly what a ROM font has to say
-// about it and the reason the atlas exists. There is no model out there either,
-// and the bar says that too - the field still takes typing, which is all a
+// this falls back to the machine's own 6x8 ROM font, and everything is in
+// English because that font has nothing else. There is no model out there
+// either, and the bar says so - the field still takes typing, which is all a
 // screenshot of this needs.
 
 import {
@@ -100,7 +119,7 @@ import {
     type IndexedImage, type KeyEvent, type TextStyle, type Typesetter
 } from "../../src/index.js";
 import { CELL_HEIGHT, outlineStyle } from "../fonts.js";
-import { Mind } from "./mind.js";
+import { Mind, type Tongue } from "./mind.js";
 
 /** Vite rewrites this to the built asset's URL, and serves it as it is in dev. */
 const PORTRAIT = new URL("./emmy.webp", import.meta.url).href;
@@ -193,10 +212,101 @@ const SCORE = compile([
     { voice: psgVoice(0),  mml: "t66 v5 q7 l1 o2 [d f b- a]2" }
 ]);
 
+// --- Both languages -----------------------------------------------------------
+
+/**
+ * Every word this example puts on the screen, twice.
+ *
+ * A table rather than a call to something, because there is nothing here a
+ * translation library would help with and because the two columns being side by
+ * side is what stops one of them rotting. The ones that take a number or a
+ * failure are functions for the same reason: the order of the pieces is part of
+ * the language, not something to be assembled with `+` at the call site.
+ *
+ * Which language is in force is not only a preference - see `tongue`. Where
+ * there is no rasteriser there is no font for Japanese, so English is not a
+ * default there, it is the only thing the machine can honestly draw.
+ */
+interface Labels {
+    /** How the row above the field marks what you said. */
+    readonly you: string;
+    /** The same row before anything has been said into it. */
+    readonly loading: string;
+    readonly hint: string;
+    readonly wakeFirst: string;
+    /** What the kana key is called, which stays worth having in English too. */
+    readonly kana: string;
+    /** The right-hand end of the bar: where Emmy is. */
+    readonly noModel: string;
+    readonly wakeKey: string;
+    waking(percent: number): string;
+    readonly thinking: string;
+    failed(note: string): string;
+    readonly awake: string;
+    /** What she says in the balloon when she cannot say anything else. */
+    saysNoModel(note: string): string;
+    readonly saysAsleep: string;
+    readonly saysWaking: string;
+}
+
+const LABELS: Record<Tongue, Labels> = {
+    ja: {
+        you: "あなた",
+        loading: "エミーを読み込んでいます...",
+        hint: "話しかけてください。Enter で送信します。",
+        wakeFirst: "F1 でエミーを起こしてから、話しかけてください。",
+        kana: "かな漢字",
+        noModel: "内蔵モデルなし",
+        wakeKey: "F1: エミーを起こす",
+        waking: (percent) => `起きています ${percent}%`,
+        thinking: "考えています",
+        failed: (note) => `失敗: ${note}`,
+        awake: "エミー います",
+        saysNoModel: (note) => `このブラウザには内蔵モデルがありません。（${note}）`,
+        saysAsleep: "まだ目が覚めていません。F1 を押すと、ブラウザがモデルを取ってきます。",
+        saysWaking: "いま目を覚ましているところです。"
+    },
+    en: {
+        you: "YOU",
+        loading: "LOADING EMMY...",
+        hint: "SAY SOMETHING. ENTER SENDS IT.",
+        wakeFirst: "PRESS F1 TO WAKE HER, THEN SAY SOMETHING.",
+        kana: "KANA-KANJI",
+        noModel: "NO MODEL",
+        wakeKey: "F1: WAKE HER",
+        waking: (percent) => `WAKING ${percent}%`,
+        thinking: "THINKING",
+        failed: (note) => `FAILED: ${note}`,
+        awake: "AWAKE",
+        saysNoModel: (note) => `This browser has no built-in model. (${note})`,
+        saysAsleep: "I am not awake yet. Press F1 and the browser will fetch the model.",
+        saysWaking: "I am waking up."
+    }
+};
+
+/**
+ * The choice itself, which has to be legible before either language has been
+ * picked - so each is named in its own, which is the one arrangement that needs
+ * no third language to explain it.
+ */
+const TONGUES: ReadonlyArray<{ readonly id: Tongue; readonly label: string }> = [
+    { id: "en", label: "English" },
+    { id: "ja", label: "日本語" }
+];
+
 // --- State --------------------------------------------------------------------
 
 /** How far the dictionary has got. Nothing is fetched until Ctrl+Space. */
 type Phase = "cold" | "loading" | "ready" | "failed";
+
+/**
+ * Which language everything is in, and which of them the chooser is pointing at.
+ *
+ * Null is a state the app is really in rather than a missing value: while it is
+ * null the panel is the chooser and nothing is being typed into anything.
+ */
+let language: Tongue | null = null;
+let choice = 0;
 
 /** The line being typed, and where the caret is in it, counted in code units. */
 let line = "";
@@ -236,6 +346,8 @@ let shown: string | null = null;
 
 export const demo: App = {
     init(ctx: Context) {
+        language = null;
+        choice = 0;
         line = "";
         caret = 0;
         left = 0;
@@ -259,19 +371,30 @@ export const demo: App = {
         ctx.bgm.play(SCORE, { loop: true });
 
         void arrive(ctx);
-        // The one question about the model that costs nothing: is it here?
-        void mind.look();
+
+        // Where there is no rasteriser there is no font for Japanese, so there
+        // is nothing to choose between: English is not a default there, it is
+        // the only thing the machine can honestly draw.
+        if (!rasteriser) settle("en");
     },
 
     update(ctx: Context) {
         const { ime, keyboard } = ctx;
+        const struck = keyboard.take();
+        if (struck.length > 0) lastKey = ctx.frame;
+
+        // Until a language has been settled there is nothing to type into and
+        // no engine to consult: the keyboard belongs to the chooser.
+        if (language === null) {
+            for (const event of struck) choose(event);
+            return;
+        }
 
         // The machine's own keys are taken before the engine sees anything: a
         // command is not text, and an engine holding one is holding a key that
         // has nothing to do with what is being typed.
         const typed: KeyEvent[] = [];
-        for (const event of keyboard.take()) {
-            lastKey = ctx.frame;
+        for (const event of struck) {
             if (!command(ctx, event)) typed.push(event);
         }
 
@@ -296,6 +419,9 @@ export const demo: App = {
             // fall back to the ROM font and carry on typing.
             note = message(error);
             rasteriser = false;
+            // Whatever was being offered a moment ago, only one of them can be
+            // drawn now.
+            if (language === null) settle("en");
             cut(ctx);
         }
     }
@@ -457,6 +583,61 @@ function masthead(ctx: Context): void {
     text.draw(x, TITLE_TOP, "Emmy AI", TITLE);
 }
 
+// --- Choosing a language ----------------------------------------------------------
+
+/**
+ * The first thing this example asks, and the only thing it asks with a menu.
+ *
+ * Both ways of working it are here because both are obvious to somebody
+ * different: a number goes straight to one of them, and the arrows walk to it
+ * for a machine being driven with a pad. There are two options and there will
+ * only ever be two, so nothing here is general.
+ */
+function choose(event: KeyEvent): void {
+    switch (event.key) {
+        case "ArrowLeft": case "ArrowUp":
+            choice = (choice + TONGUES.length - 1) % TONGUES.length;
+            return;
+        case "ArrowRight": case "ArrowDown":
+            choice = (choice + 1) % TONGUES.length;
+            return;
+        case "1": choice = 0; break;
+        case "2": choice = 1; break;
+        case "Enter": case " ": break;
+        default: return;
+    }
+    settle(TONGUES[choice].id);
+}
+
+/**
+ * Settles the language, and asks the browser about the model in it.
+ *
+ * The two belong together: what the model can answer in is part of what
+ * `availability` is asked, so there is nothing to ask until this is known.
+ */
+function settle(tongue: Tongue): void {
+    language = tongue;
+    choice = TONGUES.findIndex((one) => one.id === tongue);
+    // The one question about the model that costs nothing: is it here?
+    void mind.look(tongue);
+}
+
+/**
+ * Which of the two the labels are drawn from.
+ *
+ * Not the same thing as what was chosen. Where there is no rasteriser the atlas
+ * falls back to the machine's own ROM font, which stops at ASCII 126 - so
+ * Japanese labels there would be rows of question marks, and English is the
+ * only honest answer whatever was picked.
+ */
+function tongue(): Tongue {
+    return rasteriser === false ? "en" : language ?? "en";
+}
+
+function labels(): Labels {
+    return LABELS[tongue()];
+}
+
 // --- The machine's own keys -------------------------------------------------------
 
 /** True when the key was a command, and so is not text. */
@@ -573,15 +754,15 @@ async function think(question: string): Promise<void> {
     if (mind.state === "thinking") return;
 
     if (mind.state === "unsupported") {
-        wanted = `このブラウザには内蔵モデルがありません。（${mind.note}）`;
+        wanted = labels().saysNoModel(mind.note);
         return;
     }
     if (mind.state === "absent") {
-        wanted = "まだ目が覚めていません。F1 を押すと、ブラウザがモデルを取ってきます。";
+        wanted = labels().saysAsleep;
         return;
     }
     if (mind.state === "fetching") {
-        wanted = "いま目を覚ましているところです。";
+        wanted = labels().saysWaking;
         return;
     }
 
@@ -730,58 +911,113 @@ function words(ctx: Context, text: string): void {
     }
 }
 
-/** The same wrapping for a font whose characters are all one width. */
+/**
+ * The same wrapping for a font whose characters are all one width.
+ *
+ * Only ever the ROM font, which has no Japanese in it - so this breaks at
+ * spaces and nowhere else, and cuts a word too long for the measure rather than
+ * letting it run off the balloon.
+ */
 function fold(source: string, columns: number): string[] {
     const lines: string[] = [];
+
     for (const paragraph of source.split("\n")) {
-        for (let at = 0; at < paragraph.length; at += columns) {
-            lines.push(paragraph.slice(at, at + columns));
+        let line = "";
+        for (const word of paragraph.split(" ")) {
+            const candidate = line === "" ? word : `${line} ${word}`;
+            if (candidate.length > columns && line !== "") {
+                lines.push(line);
+                line = word;
+            } else {
+                line = candidate;
+            }
         }
-        if (paragraph === "") lines.push("");
+        while (line.length > columns) {
+            lines.push(line.slice(0, columns));
+            line = line.slice(columns);
+        }
+        lines.push(line);
     }
     return lines;
 }
 
 /**
- * Greedy wrapping on the measurements the rasteriser will use, one character at
- * a time because Japanese has no spaces to break at.
+ * Greedy wrapping on the measurements the rasteriser will use.
  *
- * Characters are measured singly and the widths added up rather than the line
+ * The two languages want opposite things of it and the same code has to do
+ * both, because a reply can contain both. Japanese has no spaces and may be
+ * broken after very nearly any character; English has spaces and may be broken
+ * at nothing else. So the line is filled with **pieces** rather than characters
+ * - a run of Latin is one piece and a kanji is one piece - and the greedy fill
+ * above them is then the same arithmetic for either.
+ *
+ * Pieces are measured singly and their widths added up rather than the line
  * being measured again at every step: the answer arrives a few characters at a
  * time and the balloon is re-wrapped each time, so the cheap way round matters.
- * It ignores what a face does between two particular glyphs, which for a
- * monospaced CJK face is nothing.
+ * It ignores what a face does between two particular glyphs, which for the
+ * monospaced face this is set in is nothing.
  *
- * The one rule of Japanese setting it does keep is the one that shows: a line
- * may not *begin* with a full stop or a closing bracket, so a character of that
- * kind is allowed to hang past the measure rather than fall to the next line.
+ * The one rule of Japanese setting it keeps is the one that shows: a line may
+ * not *begin* with a full stop, a closing bracket or a small kana, so a
+ * character of that kind hangs past the measure rather than falling to the next
+ * line.
  */
 const NO_START = "、。，．・？！」』）】〉ゝゞーぁぃぅぇぉっゃゅょァィゥェォッャュョ";
 
 function wrap(type: Typesetter, source: string, style: TextStyle, measure: number): string[] {
     const lines: string[] = [];
-    let line = "";
-    let used = 0;
 
-    for (const character of source) {
-        if (character === "\n") {
+    for (const paragraph of source.split("\n")) {
+        let line = "";
+        let used = 0;
+
+        for (const piece of pieces(paragraph)) {
+            const width = type.measure(piece, style).width;
+            if (line === "" || used + width <= measure || NO_START.includes(piece)) {
+                line += piece;
+                used += width;
+                continue;
+            }
             lines.push(line);
-            line = "";
-            used = 0;
+            // The space it broke at is spent on the break: a line does not
+            // begin with one, and a measure counted from an indent is wrong.
+            if (piece === " ") {
+                line = "";
+                used = 0;
+            } else {
+                line = piece;
+                used = width;
+            }
+        }
+        lines.push(line);
+    }
+    return lines;
+}
+
+/**
+ * The smallest things a line may not be broken inside.
+ *
+ * A run of Latin letters, digits and the punctuation that belongs to them is
+ * one piece and comes out whole or not at all. Everything else - a kanji, a
+ * kana, a space, a full stop - is a piece of its own, which is what makes
+ * Japanese breakable nearly anywhere and is how it has always been set.
+ */
+const LATIN = /[A-Za-z0-9'"(),.:;!?@#$%&*+=/\\_-]/;
+
+function* pieces(text: string): Generator<string> {
+    let word = "";
+    for (const character of text) {
+        if (LATIN.test(character)) {
+            word += character;
             continue;
         }
-        const width = type.measure(character, style).width;
-        if (line !== "" && used + width > measure && !NO_START.includes(character)) {
-            lines.push(line);
-            line = character;
-            used = width;
-        } else {
-            line += character;
-            used += width;
+        if (word !== "") {
+            yield word;
+            word = "";
         }
+        yield character;
     }
-    if (line !== "") lines.push(line);
-    return lines;
+    if (word !== "") yield word;
 }
 
 // --- The panel ---------------------------------------------------------------------
@@ -808,8 +1044,10 @@ function panel(ctx: Context): void {
     const fieldRow = term.rows - FIELD_ROW;
     const barRow = term.rows - BAR_ROW;
 
+    if (language === null) return menu(term, echoRow, fieldRow, barRow);
+
     // What was last sent, or what to do if nothing has been.
-    const echo = said === "" ? hint() : `${rasteriser ? "あなた" : "YOU"}: ${said}`;
+    const echo = said === "" ? hint() : `${labels().you}: ${said}`;
     row(term, echoRow, [{ text: echo, fg: MID, bg: PAPER }], 0, term.cols, PAPER, 0);
 
     // The field. Its paper is FLANK, which is the register the type's own flank
@@ -826,6 +1064,40 @@ function panel(ctx: Context): void {
     // Solid for half a second after a keystroke, so it does not blink out from
     // under someone who is typing, and blinking whenever they stop.
     term.cursorOn = ctx.frame - lastKey < 30 || ctx.frame % 32 < 20;
+}
+
+/**
+ * The panel before there is a language: the same three rows, asking the one
+ * question that has to be answered before any of the others can be written
+ * down.
+ *
+ * Each option is named in its own language, which is the arrangement that needs
+ * no third language to explain itself - and the chosen one is inverted, which
+ * is the only marking a grid of cells has, and the one a machine of this size
+ * used for a menu.
+ */
+function menu(term: Console, echoRow: number, fieldRow: number, barRow: number): void {
+    row(term, echoRow, [{ text: "LANGUAGE / 言語", fg: MID, bg: PAPER }], 0, term.cols, PAPER, 0);
+
+    const options: Run[] = [];
+    for (const [i, tongue] of TONGUES.entries()) {
+        const picked = i === choice;
+        options.push({ text: `${i + 1} ${tongue.label}`, fg: picked ? FLANK : INK, bg: picked ? GLOW : FLANK });
+        options.push({ text: "    ", fg: INK, bg: FLANK });
+    }
+
+    // Centred on the field, in cells, because a kanji is two of them and only
+    // the console knows whether the font it is holding has one.
+    const width = options.reduce((cells, part) => cells + term.measure(part.text), 0);
+    const pad = Math.max(0, (term.cols - width) >> 1);
+    row(term, fieldRow, [{ text: " ".repeat(pad), fg: INK, bg: FLANK }, ...options],
+        0, term.cols, FLANK, 0);
+
+    row(term, barRow, [{ text: "1 / 2      <-  ->      ENTER", fg: MID, bg: PAPER }],
+        0, term.cols, PAPER, 0);
+
+    // Nothing is being typed into, so there is nothing for a caret to sit on.
+    term.cursorOn = false;
 }
 
 /** The line as it stands, with the preedit standing where the caret is. */
@@ -933,22 +1205,26 @@ function ends(term: Console, left: string, right: string): string {
 
 /** Where Emmy is, said in as few cells as it can be. */
 function emmy(): string {
-    const latin = !rasteriser;
+    const say = labels();
     switch (mind.state) {
-        case "unsupported": return latin ? "NO MODEL" : "内蔵モデルなし";
-        case "absent": return latin ? "F1: WAKE HER" : "F1: エミーを起こす";
-        case "fetching": return `${latin ? "WAKING" : "起きています"} ${Math.round(mind.progress * 100)}%`;
-        case "thinking": return latin ? "THINKING" : "考えています";
-        case "failed": return latin ? "FAILED" : `失敗: ${mind.note}`;
-        default: return latin ? "AWAKE" : "エミー います";
+        case "unsupported": return say.noModel;
+        case "absent": return say.wakeKey;
+        case "fetching": return say.waking(Math.round(mind.progress * 100));
+        case "thinking": return say.thinking;
+        case "failed": return say.failed(mind.note);
+        default: return say.awake;
     }
 }
 
-/** What the kana key is offering, which is not the same thing at each stage. */
+/**
+ * What the kana key is offering, which is not the same thing at each stage.
+ *
+ * It is offered in English too rather than hidden there: the language decides
+ * what the labels are written in, not what the machine can be typed in, and
+ * somebody reading an English screen may still want to write Japanese into it.
+ */
 function kana(converting: boolean): string {
-    // The ROM font has no kana, so where it is the one drawing, this says the
-    // same thing in the alphabet it does have.
-    const name = rasteriser ? "かな漢字" : "KANA-KANJI";
+    const name = labels().kana;
     switch (phase) {
         case "cold": return `Ctrl+Space: ${name}  15MB`;
         case "loading": return `${name} ${Math.round(progress * 100)}%`;
@@ -959,11 +1235,9 @@ function kana(converting: boolean): string {
 
 /** What the field says before anything has been sent to it. */
 function hint(): string {
-    if (picture === "loading") return rasteriser ? "エミーを読み込んでいます..." : "LOADING...";
-    if (!rasteriser) return "TYPE SOMETHING, THEN ENTER.";
-    return mind.state === "absent"
-        ? "F1 でエミーを起こしてから、話しかけてください。"
-        : "話しかけてください。Enter で送信します。";
+    const say = labels();
+    if (picture === "loading") return say.loading;
+    return mind.state === "absent" ? say.wakeFirst : say.hint;
 }
 
 function message(error: unknown): string {

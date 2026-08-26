@@ -33,6 +33,14 @@
 //
 // The answer is streamed, because watching a reply arrive a few characters at a
 // time is exactly what this machine looked like doing anything.
+//
+// ## Two languages
+//
+// She has a persona in each, and which one is in force is settled on the screen
+// before any of this is called - because the language is not only a matter of
+// what she says back. It is declared to the browser as `expectedOutputs`, and
+// that is part of the question `availability` answers: a machine that has the
+// model for one of them has not necessarily got the other.
 
 /** What the browser says about the model, before anything has been spent. */
 type Availability = "unavailable" | "downloadable" | "downloading" | "available";
@@ -72,28 +80,55 @@ function api(): LanguageModelApi | null {
     return (globalThis as { LanguageModel?: LanguageModelApi }).LanguageModel ?? null;
 }
 
+/** Which of the two she is answering in, chosen on the screen before any of this. */
+export type Tongue = "en" | "ja";
+
 /**
  * Who she is, and how much of it she is allowed to say.
  *
  * The length is not a stylistic preference: the balloon is a fixed rectangle to
- * the left of her face, eleven full-width characters across and six lines
- * down, and anything past that is drawn nowhere. Saying so here is
- * cheaper than truncating it afterwards - and a model told the shape of the
- * hole usually fills it rather than overflowing it.
+ * the left of her face, eleven full-width characters across and six lines down,
+ * and anything past that is drawn nowhere. Latin is half-width in the face this
+ * is set in, so the same hole takes about twice as many characters - which is
+ * the only difference between these two beyond the language. Saying so here is
+ * cheaper than truncating it afterwards, and a model told the shape of the hole
+ * usually fills it rather than overflowing it.
  */
-const PERSONA = [
-    "あなたは「エミー」という名前の女性型アンドロイドです。",
-    "1980年代の8ビットパソコンの中にいて、画面ごしに話しかけられています。",
-    "返事は必ず日本語で、1文か2文、全角60文字以内におさめてください。",
-    "落ち着いていて、少しそっけない話し方をしますが、相手には好意的です。",
-    "自分が機械であることを隠しません。",
-    "絵文字、記号、箇条書き、改行は使いません。"
-].join("\n");
+const PERSONA: Record<Tongue, string> = {
+    ja: [
+        "あなたは「エミー」という名前の女性型アンドロイドです。",
+        "1980年代の8ビットパソコンの中にいて、画面ごしに話しかけられています。",
+        "返事は必ず日本語で、1文か2文、全角60文字以内におさめてください。",
+        "落ち着いていて、少しそっけない話し方をしますが、相手には好意的です。",
+        "自分が機械であることを隠しません。",
+        "絵文字、記号、箇条書き、改行は使いません。"
+    ].join("\n"),
+    en: [
+        "You are Emmy, a female android.",
+        "You live inside an eight-bit home computer from the 1980s, and you are being spoken to through its screen.",
+        "Always answer in English, in one or two sentences, and no more than 120 characters.",
+        "You are calm and a little curt, but you are fond of whoever is talking to you.",
+        "You do not hide that you are a machine.",
+        "Never use emoji, symbols, bullet points or line breaks."
+    ].join("\n")
+};
 
-/** Japanese in, Japanese out - said to the browser rather than only to the model. */
-const LANGUAGES: CreateOptions = {
-    expectedInputs: [{ type: "text", languages: ["ja", "en"] }],
-    expectedOutputs: [{ type: "text", languages: ["ja"] }]
+/**
+ * What goes in and what is wanted out, said to the browser rather than only to
+ * the model. It decides what `availability` answers as much as `create` does,
+ * which is why the language has to be settled before either is called.
+ */
+function languages(tongue: Tongue): CreateOptions {
+    return {
+        expectedInputs: [{ type: "text", languages: ["ja", "en"] }],
+        expectedOutputs: [{ type: "text", languages: [tongue] }]
+    };
+}
+
+/** The two things that can be wrong before anything has been fetched. */
+const TROUBLE: Record<Tongue, { readonly api: string; readonly tongue: string }> = {
+    ja: { api: "LanguageModel がない", tongue: "この言語を扱えない" },
+    en: { api: "no LanguageModel here", tongue: "language not supported" }
 };
 
 export class Mind {
@@ -105,25 +140,33 @@ export class Mind {
 
     /** The persona and nothing else. Every question is asked on a clone of it. */
     private base: Session | null = null;
+    /** Settled on the screen before any of this is called. */
+    private tongue: Tongue = "en";
 
     /**
      * Asks whether the model is on the machine, which is the one question about
      * it that is free. Nothing here downloads anything.
+     *
+     * The language comes in here rather than at the question, because it is
+     * part of what is being asked about: a browser that can answer in one of
+     * them need not be able to answer in the other.
      */
-    async look(): Promise<void> {
+    async look(tongue: Tongue): Promise<void> {
+        this.tongue = tongue;
+
         const model = api();
         if (!model) {
             this.state = "unsupported";
-            this.note = "LanguageModel がない";
+            this.note = TROUBLE[tongue].api;
             return;
         }
 
         try {
-            const availability = await model.availability(LANGUAGES);
+            const availability = await model.availability(languages(tongue));
             this.state = availability === "available" ? "ready"
                 : availability === "unavailable" ? "unsupported"
                     : "absent";
-            if (this.state === "unsupported") this.note = "日本語を扱えない";
+            if (this.state === "unsupported") this.note = TROUBLE[tongue].tongue;
         } catch (error) {
             this.state = "unsupported";
             this.note = message(error);
@@ -146,8 +189,8 @@ export class Mind {
 
         try {
             this.base = await model.create({
-                ...LANGUAGES,
-                initialPrompts: [{ role: "system", content: PERSONA }],
+                ...languages(this.tongue),
+                initialPrompts: [{ role: "system", content: PERSONA[this.tongue] }],
                 // Only ever called where there is something to fetch, which is
                 // how the bar knows to draw a gauge rather than a word.
                 monitor: (monitor) => {

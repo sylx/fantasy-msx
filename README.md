@@ -953,7 +953,22 @@ and the reason the atlas exists.
 
 ### EMMY
 
-An eighties conversation game, with both halves borrowed from the browser.
+An eighties conversation game, with both halves borrowed from the browser, in
+English or in Japanese.
+
+**The first thing it asks is which.** A menu of two, each named in its own
+language, because a chooser that had to be read in a third one would be no
+chooser at all - **1** and **2**, or the arrows and Enter. Everything after it
+comes out of a table with two columns: the labels, the bar, what she says when
+she cannot answer, and her persona. The wrapping in the balloon does both, and
+has to, because a reply can contain both: a run of Latin comes out whole or not
+at all, and Japanese breaks where Japanese breaks, except before a full stop or
+a small kana.
+
+The choice is asked of the browser too. What she may answer in is declared as
+`expectedOutputs`, and that is part of what `availability` answers - a machine
+with the model for one of them has not necessarily got the other - which is why
+nothing is asked about the model until the language is settled.
 
 The screen is three bands and there is no fourth: a masthead, a cut-out of her
 on a couch, and one line you type into. That is not a style - it is what a
@@ -1007,9 +1022,10 @@ holding the persona and no conversation at all: partly the built-in model's
 small context, and mostly the right amount of memory for a game of this kind.
 `examples/emmy/mind.ts` is the only file that knows the Prompt API exists.
 
-Outside a browser there is no rasteriser and no model. The field still takes
-typing, the balloon still opens, and both of them say so in the 6x8 ROM font -
-where the Japanese is a row of question marks, as it has to be.
+Outside a browser there is no rasteriser and no model, and no menu either: the
+ROM font stops at ASCII 126, so Japanese labels would be rows of question marks
+and English is the only thing the machine can honestly draw. The field still
+takes typing, the balloon still opens, and both of them say so in the 6x8 font.
 
 
 ### LOOM
