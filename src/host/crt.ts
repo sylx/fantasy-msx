@@ -93,7 +93,7 @@ export const CRT_DEFAULTS: Readonly<CrtParams> = Object.freeze({
     scanlineIntensity: 0.35,
     scanlineCount: "auto",
     adaptiveIntensity: 0.3,
-    brightness: 1.2,
+    brightness: 1.1,
     contrast: 1.05,
     saturation: 1.1,
     bloomIntensity: 0.8,
