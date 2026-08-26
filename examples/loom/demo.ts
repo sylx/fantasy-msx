@@ -713,6 +713,63 @@ function newParts(): Part[] {
     ];
 }
 
+/**
+ * What a part is allowed to be voiced as, and who it shares that pool with.
+ * The chip's instruments sorted by the job they can hold down rather than by
+ * number: a pad wants something that sustains, a bass wants the bottom of the
+ * chip, and the two of them wanting different things is the only reason the
+ * seven parts stay seven parts. Parts in the same family never land on the
+ * same voice, so the pad and the lead cannot quietly become one instrument.
+ *
+ * The drums are not here. Their cell is a groove rather than a timbre, and
+ * re-rolling it would move notes rather than recolour them.
+ */
+const VOICE_POOL: Partial<Record<PartId, { family: string; pool: readonly number[] }>> = {
+    pad: {
+        family: "fm",
+        pool: [INSTRUMENT.ORGAN, INSTRUMENT.CLARINET, INSTRUMENT.VIOLIN,
+               INSTRUMENT.HORN, INSTRUMENT.SYNTHESIZER, INSTRUMENT.CUSTOM]
+    },
+    lead: {
+        family: "fm",
+        pool: [INSTRUMENT.TRUMPET, INSTRUMENT.FLUTE, INSTRUMENT.OBOE,
+               INSTRUMENT.VIOLIN, INSTRUMENT.SYNTHESIZER, INSTRUMENT.ELECTRIC_GUITAR]
+    },
+    bass: {
+        family: "fm",
+        pool: [INSTRUMENT.ACOUSTIC_BASS, INSTRUMENT.SYNTHESIZER_BASS,
+               INSTRUMENT.GUITAR, INSTRUMENT.PIANO]
+    },
+    arp: { family: "psg", pool: PSG_VOICES.map((_, i) => i) },
+    echo: { family: "psg", pool: PSG_VOICES.map((_, i) => i) },
+    hat: { family: "hat", pool: HAT_VOICES.map((_, i) => i) }
+};
+
+/**
+ * New colours for a new piece: every part off the voice it was on, and off
+ * the ones its family has already taken. The desk is left otherwise alone -
+ * levels and mutes are the listener's, not the machine's.
+ */
+function revoice(random: Random): void {
+    const taken = new Map<string, Set<number>>();
+
+    for (const part of parts) {
+        const entry = VOICE_POOL[part.id];
+        if (!entry) continue;
+
+        let used = taken.get(entry.family);
+        if (!used) taken.set(entry.family, (used = new Set()));
+
+        const free = entry.pool.filter((voice) => voice !== part.voice && !used.has(voice));
+        // A pool small enough to be used up falls back to the whole of itself,
+        // which is a repeat rather than a part with nothing to play.
+        part.voice = random.pick(free.length > 0 ? free : entry.pool);
+        used.add(part.voice);
+    }
+
+    dirty.mixer = true;
+}
+
 /** Which OPLL channel each FM part sings on. Rhythm mode claims 6, 7 and 8. */
 const PAD_CHANNELS: readonly OpllChannel[] = [0, 1, 2, 3];
 const LEAD_CHANNEL: OpllChannel = 4;
@@ -1056,7 +1113,13 @@ function regenerate(ctx: Context, change: Change, fromTheTop = true): void {
         : change === "CHORDS" ? settled
         : { ...settled, chords: phrase.chords };
 
-    load(ctx, makePhrase(nextSeed(), GROOVES[partOf("drum").voice], keep), fromTheTop);
+    const seed = nextSeed();
+    // A new key is a whole new piece, so it arrives in new colours as well as
+    // new notes: the voices are re-drawn before the phrase is, and the parts
+    // pick their instrument up on the next note they key on.
+    if (change === "KEY") revoice(new Random(seed ^ 0xc2b2ae35));
+
+    load(ctx, makePhrase(seed, GROOVES[partOf("drum").voice], keep), fromTheTop);
 }
 
 /** One bar of the progression, redrawn - and the parts written over it again. */
