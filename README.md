@@ -363,6 +363,90 @@ picked. Every square-pixel mode, and a 512-wide one on a canvas sized for it, go
 straight to the screen untouched.
 
 
+## The CRT
+
+None of the above is the whole of what a picture looked like in 1988. There is
+an optional tube in front of it: scanlines, bloom on the bright parts, a
+badly-converged RGB fringe, a curve to the glass, a vignette and a mains
+flicker. It is a WebGL2 fragment shader over one quad, so the machine pays
+nothing for it - the V9938 has finished with the frame before the shader sees
+it, and the pixels underneath are exactly the ones it drew.
+
+```ts
+const runtime = run(app, { canvas, crt: true });
+```
+
+`crt: true` takes the defaults; an object sets any of them to start with. Every
+one of them is live afterwards, on `runtime.crt` and on `ctx.crt`, which are
+the same object:
+
+```ts
+update({ crt, input }) {
+    if (!crt) return;                              // no tube on this host
+    if (input.pressed(BUTTON.A)) crt.enabled = !crt.enabled;
+    crt.set({ curvature: 0.2, scanlineIntensity: 0.5 });
+    crt.params.yOffset += 0.01;                    // roll the picture
+    crt.reset();                                   // back to the defaults
+}
+```
+
+| | | |
+|---|---|---|
+| `enabled` | | Off passes the frame through untouched. Free to flip. |
+| `smoothing` | | Magnify with a plain filter instead of keeping pixel edges hard. |
+| `scanlineIntensity` | 0 – 1 | How dark the gaps go. |
+| `scanlineCount` | `"auto"` | Lines to lay down. `"auto"` is the frame's own height. |
+| `adaptiveIntensity` | 0 – 1 | Varies the scanline depth down the screen. |
+| `brightness` | 0.6 – 1.8 | Before contrast, and on the bloom tap. |
+| `contrast` | 0.6 – 1.8 | Around mid grey. |
+| `saturation` | 0 – 2 | 0 is greyscale, 1 leaves it, 2 is lurid. |
+| `bloomIntensity` | 0 – 1.5 | How far the bright parts bleed. |
+| `bloomThreshold` | 0 – 1 | What counts as bright. |
+| `rgbShift` | 0 – 1 | Red and blue pulled apart, as a misconverged tube does. |
+| `vignetteStrength` | 0 – 2 | How far the corners fall off. |
+| `curvature` | 0 – 0.5 | How far the glass bulges. Past the edge is black. |
+| `flickerStrength` | 0 – 0.15 | Mains hum in the brightness. |
+| `yOffset` | | Scanline phase. Wind it to roll the picture. |
+
+Three things are worth knowing before turning it on.
+
+**The canvas is decided at boot.** A canvas has one kind of context for its
+whole life, and the tube needs WebGL2 where the flat path needs 2D. So `crt`
+is a `boot` option and not a switch: `enabled` turns the effect off, but the
+canvas keeps its WebGL context and goes on drawing the quad. To go back to the
+flat path you have to boot on a fresh canvas, which is what the launcher's CRT
+button does. Where WebGL2 is missing the host says so on the console, draws the
+frames itself, and leaves `crt` null - which is why the examples above check.
+
+**The magnification moves to the GPU.** What goes up as a texture is the VDP's
+own canvas, which is 544x456 whatever the mode and has the picture in a corner
+of it - 272x228 for SCREEN 5 and 8, 544x228 for SCREEN 6 and 7. The shader is
+told where that corner is and how far each axis is being stretched, and works
+in the picture's own coordinates from there. So the modes come out the way they
+should: SCREEN 5 magnified the same amount across as down, SCREEN 7 half as far
+across as down, because its columns really are half as wide.
+
+That leaves the same odd-magnification problem the flat path has, and the
+shader deals with it rather better. `smoothing` off - the default - lands on
+texel centres wherever the magnification is a whole number, so the pixels are
+hard; where it is not, it crosses from one column to the next over exactly one
+screen pixel instead of keeping every other column twice. Per axis, so a
+SCREEN 7 frame at 1.5 across and 3 down is resolved across and hard down. The
+sampler is filtering either way: the hard edges are the shader picking centres,
+which is what lets the same code do both. `smoothing` on gives that up for a
+plain filter, which is softer and is the look the shader was written for.
+
+**The mouse does not follow the curve.** `ctx.pointer` undoes the CSS scaling
+and the letterboxing, but not the curvature: that bends what is shown, not
+where the machine thinks its pixels are. At `curvature: 0.08` the corners are
+out by a pixel or two and nobody notices. Wind it up and the cursor and the
+picture part company.
+
+The shader is [gingerbeardman's WebGL CRT
+shader](https://github.com/gingerbeardman/webgl-crt-shader), MIT licensed. See
+[Credit and licensing](#credit-and-licensing).
+
+
 ## The mouse
 
 `ctx.pointer` is where the mouse is, in the machine's own pixels - the ones
@@ -1092,6 +1176,14 @@ Pages on a private repository needs a paid plan; on a free one the repository
 has to be public.
 
 ## Credit and licensing
+
+The CRT shader under `src/host/crt.ts` is [WebGL CRT
+Shader](https://github.com/gingerbeardman/webgl-crt-shader) by **Matt
+Sephton**, MIT licensed, and itself a conversion of a LOVE2D shader. The GLSL
+here is his; what is different is that it is written as WebGL2 directly rather
+than assembled at runtime out of the three.js version, and that it samples the
+picture out of the corner of the VDP's canvas at that canvas's own size, per
+axis, instead of a canvas already scaled up to fit.
 
 The chip emulation is WebMSX by **Paulo Augusto Peccin**, vendored under
 `src/core/vendor/` and copied verbatim so its provenance stays visible in the

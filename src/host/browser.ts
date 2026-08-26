@@ -6,6 +6,7 @@ import { BUTTON, type Button, type Input, type Player } from "../runtime/input.j
 import { MOUSE, type MouseButton, type Pointer } from "../runtime/pointer.js";
 import { FRAME_RATE, type DroppedFile, type Host, type Runtime } from "../runtime/runtime.js";
 import { WebAudioOutput } from "./audio.js";
+import { CrtDisplay, type CrtOptions } from "./crt.js";
 
 const FRAME_SECONDS = 1 / FRAME_RATE;
 /** Never run more than this many frames to catch up, or a stall turns into a stampede. */
@@ -26,6 +27,16 @@ export interface BrowserHostOptions {
     drop?: boolean;
     /** Report the mouse. On by default. */
     pointer?: boolean;
+    /**
+     * Put the picture through the CRT shader: `true` for its defaults, or the
+     * parameters to start with. Off by default, and off means the canvas keeps
+     * its 2D context and none of this is compiled.
+     *
+     * A canvas has one kind of context for its lifetime, so this decides which
+     * one it gets. Where WebGL2 is not available the host says so and falls
+     * back to drawing the frame itself, and `host.crt` is then null.
+     */
+    crt?: boolean | CrtOptions;
 }
 
 /**
@@ -65,8 +76,12 @@ const GAMEPAD_B = 1;
 const AXIS_THRESHOLD = 0.4;
 
 export class BrowserHost implements Host {
+    /** The tube the picture arrives on, or null where it is going straight to the canvas. */
+    readonly crt: CrtDisplay | null = null;
+
     private readonly canvas: HTMLCanvasElement;
-    private readonly context: CanvasRenderingContext2D;
+    /** Null when the CRT owns the canvas: a canvas only ever has one context. */
+    private readonly context: CanvasRenderingContext2D | null = null;
     private readonly options: BrowserHostOptions;
     private input: Input | null = null;
     private audio: WebAudioOutput | null = null;
@@ -83,8 +98,17 @@ export class BrowserHost implements Host {
     constructor(options: BrowserHostOptions) {
         this.options = options;
         this.canvas = options.canvas;
+
+        if (options.crt) {
+            this.crt = CrtDisplay.create(this.canvas, options.crt === true ? {} : options.crt);
+            if (this.crt) return;
+        }
+
         const context = this.canvas.getContext("2d", { alpha: false });
-        if (!context) throw new Error("could not get a 2d context for the display canvas");
+        if (!context) {
+            throw new Error("could not get a 2d context for the display canvas"
+                + " (a canvas that has already been given a WebGL context cannot give one)");
+        }
         this.context = context;
         // Nearest neighbour: the pixels are the point.
         this.context.imageSmoothingEnabled = false;
@@ -283,9 +307,16 @@ export class BrowserHost implements Host {
 
     present(frame: Frame | null, pixelAspect = 1): void {
         const { width, height } = this.canvas;
-        this.context.fillStyle = this.options.background ?? "#000";
-        this.context.fillRect(0, 0, width, height);
-        if (!frame) return;
+        const background = this.options.background ?? "#000";
+
+        if (!frame) {
+            if (this.crt) this.crt.clear(background);
+            else if (this.context) {
+                this.context.fillStyle = background;
+                this.context.fillRect(0, 0, width, height);
+            }
+            return;
+        }
 
         // Scale by the picture's true width, not its pixel count: a 512-pixel
         // mode fills the same screen as a 256-pixel one, so both come out the
@@ -300,21 +331,47 @@ export class BrowserHost implements Host {
 
         // In a browser the VDP renders into a real canvas, which is what this is.
         const source = frame.source as unknown as CanvasImageSource;
-        const columns = this.resolve(source, frame, drawWidth, drawHeight);
-        if (columns) {
-            // The extra columns are resolved rather than picked: smoothing is on
-            // for this one draw, and only the horizontal is being changed.
-            this.context.imageSmoothingEnabled = true;
-            this.context.imageSmoothingQuality = "high";
-            this.context.drawImage(columns, 0, 0, frame.width, drawHeight, left, top, drawWidth, drawHeight);
-            this.context.imageSmoothingEnabled = false;
-        } else {
-            this.context.drawImage(source, 0, 0, frame.width, frame.height, left, top, drawWidth, drawHeight);
+        if (this.crt) {
+            // The VDP renders into one canvas of a fixed size whatever the
+            // mode and puts the picture in a corner of it, so what goes up is
+            // the whole image and the crop says which part of it to show. The
+            // GPU does the magnification from there, and the resolving of odd
+            // columns below happens in the shader instead.
+            this.crt.present(
+                {
+                    image: source as TexImageSource,
+                    // A source that will not say how large it is is taken to be
+                    // the picture and nothing else, which is the old behaviour.
+                    width: frame.source.width || frame.width,
+                    height: frame.source.height || frame.height,
+                    crop: { x: 0, y: 0, width: frame.width, height: frame.height }
+                },
+                { x: left, y: top, width: drawWidth, height: drawHeight }, background
+            );
+        } else if (this.context) {
+            this.context.fillStyle = background;
+            this.context.fillRect(0, 0, width, height);
+
+            const columns = this.resolve(source, frame, drawWidth, drawHeight);
+            if (columns) {
+                // The extra columns are resolved rather than picked: smoothing is on
+                // for this one draw, and only the horizontal is being changed.
+                this.context.imageSmoothingEnabled = true;
+                this.context.imageSmoothingQuality = "high";
+                this.context.drawImage(columns, 0, 0, frame.width, drawHeight, left, top, drawWidth, drawHeight);
+                this.context.imageSmoothingEnabled = false;
+            } else {
+                this.context.drawImage(source, 0, 0, frame.width, frame.height, left, top, drawWidth, drawHeight);
+            }
         }
 
         // Where it landed, so the mouse can be read back into the same pixels.
         // The frame carries the border with it and the active display sits in
         // the middle of it, which is where the machine's own origin is.
+        //
+        // The CRT's curvature is not undone here: it bends what is shown, not
+        // where the machine thinks its pixels are, so a heavily curved tube
+        // and the cursor drift apart at the corners.
         const screen = this.runtime?.bios.screen;
         const active = { width: screen?.width ?? frame.width, height: screen?.height ?? frame.height };
         this.layout = {
@@ -397,6 +454,9 @@ export class BrowserHost implements Host {
         this.layout = null;
         void this.audio?.stop();
         this.audio = null;
+        // The context stays on the canvas - it has to, a canvas cannot swap
+        // one - but the program and the texture on it are this host's.
+        this.crt?.dispose();
     }
 
     private pollGamepads(): void {

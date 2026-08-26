@@ -26,6 +26,9 @@
     }
     nav button:hover { border-color: #46466a; color: #cfcfe4; }
     nav button[aria-current="true"] { background: #e0703a; border-color: #e0703a; color: #14141c; }
+    /* The CRT toggle is a setting, not an example: it sits apart and lights up green. */
+    nav button[aria-pressed] { margin-left: .6rem; }
+    nav button[aria-pressed="true"] { background: #2f6b4a; border-color: #3f8a60; color: #dff2e6; }
 
     canvas {
         image-rendering: pixelated; background: #000;

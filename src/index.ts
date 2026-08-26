@@ -10,6 +10,7 @@
 
 import { createBios, type Bios } from "./bios/index.js";
 import { BrowserHost } from "./host/browser.js";
+import type { CrtOptions } from "./host/crt.js";
 import { HeadlessHost } from "./host/headless.js";
 import { Runtime, type App, type Host } from "./runtime/runtime.js";
 
@@ -17,6 +18,7 @@ export * from "./api/index.js";
 export * from "./bios/index.js";
 export { BrowserHost, type BrowserHostOptions } from "./host/browser.js";
 export { connectHechima, type HechimaConnection, type HechimaOptions } from "./host/hechima.js";
+export { CrtDisplay, CRT_DEFAULTS, type Crt, type CrtOptions, type CrtParams, type CrtSource, type CrtViewport } from "./host/crt.js";
 export { HeadlessHost } from "./host/headless.js";
 export { AudioMixer, WebAudioOutput } from "./host/audio.js";
 export * from "./runtime/input.js";
@@ -39,13 +41,29 @@ export interface BootOptions {
      * is to watch the machine work.
      */
     blitterSpeed?: number;
+    /**
+     * Show the picture through a CRT: `true` for the default tube, or the
+     * parameters to start it with. Off by default.
+     *
+     * Whatever is set here is only where it starts - `runtime.crt` and
+     * `ctx.crt` are the same tube, and every parameter is live:
+     *
+     *     const runtime = run(app, { canvas, crt: { curvature: 0.2 } });
+     *     runtime.crt?.set({ scanlineIntensity: 0.5, smoothing: true });
+     *     runtime.crt.enabled = false;
+     *
+     * Only meaningful with a `canvas` and the browser host. It decides which
+     * kind of context that canvas gets, and where WebGL2 is missing the host
+     * says so, draws the frames itself, and leaves `runtime.crt` null.
+     */
+    crt?: boolean | CrtOptions;
 }
 
 /** Brings up a machine and a runtime, without starting the clock. */
 export function boot(options: BootOptions = {}): Runtime {
     const host = options.host
         ?? (options.canvas
-            ? new BrowserHost({ canvas: options.canvas, scale: options.scale })
+            ? new BrowserHost({ canvas: options.canvas, scale: options.scale, crt: options.crt })
             : new HeadlessHost());
 
     const bios = options.bios ?? createBios();

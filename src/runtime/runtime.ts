@@ -13,6 +13,7 @@
 import type { Bios } from "../bios/index.js";
 import type { Console, Graphics, Images, Ime, Screen, SoundDriver, Sprites, Typesetter } from "../bios/index.js";
 import type { Frame } from "../core/machine.js";
+import type { Crt } from "../host/crt.js";
 import { Input } from "./input.js";
 import { Keyboard } from "./keyboard.js";
 import { Pointer } from "./pointer.js";
@@ -48,6 +49,13 @@ export interface Context {
      * never move it, and `pointer.present` says which case you are in.
      */
     readonly pointer: Pointer;
+    /**
+     * The CRT the picture is arriving on, and its parameters - null where the
+     * host is putting frames straight on a canvas, which is the default.
+     *
+     *     ctx.crt?.set({ curvature: 0.2, scanlineIntensity: 0.5 });
+     */
+    readonly crt: Crt | null;
     /** Frames since the runtime started. */
     readonly frame: number;
     /** Seconds since the runtime started, counted in frames rather than wall clock. */
@@ -90,6 +98,11 @@ export interface App {
 
 /** Where frames go and what drives the clock. */
 export interface Host {
+    /**
+     * The CRT this host shows frames through, where it has one. A host with no
+     * such thing simply has not got the property, and `runtime.crt` is null.
+     */
+    readonly crt?: Crt | null;
     /**
      * Called once, with the runtime, so the host can reach the things it needs
      * - input to wire events to, and the machine to pull audio from.
@@ -153,6 +166,10 @@ export class Runtime implements Context {
 
     get bgm(): SoundDriver {
         return this.bios.bgm;
+    }
+
+    get crt(): Crt | null {
+        return this.host.crt ?? null;
     }
 
     get frame(): number {

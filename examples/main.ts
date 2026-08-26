@@ -8,13 +8,18 @@
 import { BUTTON, boot, type Button, type Runtime } from "../src/index.js";
 import { EXAMPLES, findExample, type Example } from "./registry.js";
 
-const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+let canvas = document.querySelector("canvas") as HTMLCanvasElement;
 const nav = document.querySelector("nav") as HTMLElement;
 const summary = document.querySelector("#summary") as HTMLElement;
 const controls = document.querySelector("#controls") as HTMLElement;
 
+const CRT_KEY = "fantasy-msx.crt";
+
 let runtime: Runtime | null = null;
 let running: string | null = null;
+let crt = localStorage.getItem(CRT_KEY) === "on";
+/** Which kind of context the canvas on the page has been given, if any yet. */
+let display: "flat" | "crt" | null = null;
 
 // One button per example, marked so the current one reads as selected.
 const buttons = new Map<string, HTMLButtonElement>();
@@ -24,6 +29,42 @@ for (const example of EXAMPLES) {
     button.addEventListener("click", () => { location.hash = example.id; });
     nav.append(button);
     buttons.set(example.id, button);
+}
+
+// The tube, off by default. A canvas keeps the kind of context it was first
+// given for life, so turning it on and off swaps the canvas for a fresh one
+// and reboots - which is why this is a page decision rather than a game one.
+// Everything else about the tube is live: see `runtime.crt`.
+const crtButton = document.createElement("button");
+crtButton.textContent = "CRT";
+crtButton.title = "Scanlines, bloom and a curved tube";
+crtButton.setAttribute("aria-pressed", String(crt));
+crtButton.addEventListener("click", () => {
+    crt = !crt;
+    localStorage.setItem(CRT_KEY, crt ? "on" : "off");
+    crtButton.setAttribute("aria-pressed", String(crt));
+    void relaunch();
+});
+nav.append(crtButton);
+
+/** The canvas to boot on, replaced where the context it needs is not the one it has. */
+function displayCanvas(): HTMLCanvasElement {
+    const wanted = crt ? "crt" : "flat";
+    if (display !== null && display !== wanted) {
+        const fresh = canvas.cloneNode(false) as HTMLCanvasElement;
+        canvas.replaceWith(fresh);
+        canvas = fresh;
+    }
+    display = wanted;
+    return canvas;
+}
+
+/** Boots the running example again, from the top. */
+async function relaunch(): Promise<void> {
+    const id = running;
+    if (id === null) return;
+    running = null;
+    await launch(findExample(id));
 }
 
 async function launch(example: Example): Promise<void> {
@@ -39,7 +80,7 @@ async function launch(example: Example): Promise<void> {
     // The fragment may have changed again while the module was loading.
     if (running !== example.id) return;
 
-    runtime = boot({ canvas });
+    runtime = boot({ canvas: displayCanvas(), crt });
     bindTouch(runtime);
     runtime.run(app);
 }
