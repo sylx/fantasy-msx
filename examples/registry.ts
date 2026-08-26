@@ -45,7 +45,7 @@ export const EXAMPLES: readonly Example[] = [
         id: "editor",
         title: "EDITOR",
         summary: "A Japanese text editor with nothing on screen the V9938 did not draw. A grid of 42 by 17 cells laid over a bitmap, glyphs cached in a spare VRAM page in place of the kanji ROM this machine never had, and Mozc running in a worker behind a session layer with no UI of its own - so the candidate list along the foot of the screen is cells in the same palette as the document. F1 switches between an outline face in SCREEN 7 and a bitmap one in SCREEN 5, which is a mode change because the face decides the mode. F2 puts the font page itself on the display. The whole visible page is re-emitted every frame and only the cells that changed reach VRAM: EDIT in the status bar counts them.",
-        controls: "type \u00b7 F1 for the face and the mode \u00b7 F2 to look at the VRAM page \u00b7 F3 for the dictionary, then kana or direct \u00b7 Space converts, 1-9 take a candidate, Enter settles \u00b7 arrows, Home / End, PageUp / PageDown, Backspace, Delete, Tab",
+        controls: "type \u00b7 F1 for the face and the mode \u00b7 F2 to look at the VRAM page \u00b7 Ctrl+Space for the dictionary, then kana or direct \u00b7 Space converts, 1-9 take a candidate, Enter settles \u00b7 arrows, Home / End, PageUp / PageDown, Backspace, Delete, Tab",
         load: async () => (await import("./editor/demo.js")).demo
     },
     {

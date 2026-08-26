@@ -975,6 +975,33 @@ describe("the EDITOR demo", () => {
         expect(runtime.screen.palette[1]).toEqual(before);
     });
 
+    it("names the kana key on the status bar, and spends nothing until it is pressed", async () => {
+        const runtime = await started();
+        const status = runtime.console.rowText(runtime.console.rows - 2);
+        // Ctrl+Space is the one command with nowhere else to be: the function
+        // keys have a row of labels along the foot and this has the status bar.
+        expect(status).toContain("C-Space");
+        expect(status).toContain("かな漢字");
+        expect(status).toContain("15MB");
+        // And nothing has been fetched: an app that never asks never pays.
+        expect(runtime.ime.attached).toBe(false);
+    });
+
+    it("asks for the dictionary on Ctrl+Space, and says so when it cannot have one", async () => {
+        const runtime = await started();
+        runtime.keyboard.press({ code: "Space", key: " ", ctrlKey: true });
+        runtime.step(2);
+        // There is no Worker here, so this is the failure path - what is being
+        // tested is that the key is what asked, and that the bar says so.
+        await Promise.resolve();
+        await new Promise((settle) => setTimeout(settle, 0));
+        runtime.step(2);
+
+        expect(runtime.console.rowText(runtime.console.rows - 2)).toContain("失敗");
+        // The key itself typed nothing: a command is not text.
+        expect(text(runtime, 1)).toBe("FANTASY MSX - EDITOR");
+    });
+
     it("draws the preedit at the caret and the candidates along the foot", async () => {
         const runtime = await started();
         press(runtime, "End");

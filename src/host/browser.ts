@@ -72,6 +72,8 @@ export class BrowserHost implements Host {
     private audio: WebAudioOutput | null = null;
     private runtime: Runtime | null = null;
     /** Null until a frame has been shown and there is somewhere to point at. */
+    /** Where a 512-wide mode is squashed, when the canvas has no whole number to give. */
+    private scratch: HTMLCanvasElement | null = null;
     private layout: Layout | null = null;
     private raf = 0;
     private previousTime = 0;
@@ -296,12 +298,19 @@ export class BrowserHost implements Host {
         const left = ((width - drawWidth) / 2) | 0;
         const top = ((height - drawHeight) / 2) | 0;
 
-        this.context.drawImage(
-            // In a browser the VDP renders into a real canvas, which is what this is.
-            frame.source as unknown as CanvasImageSource,
-            0, 0, frame.width, frame.height,
-            left, top, drawWidth, drawHeight
-        );
+        // In a browser the VDP renders into a real canvas, which is what this is.
+        const source = frame.source as unknown as CanvasImageSource;
+        const columns = this.resolve(source, frame, drawWidth, drawHeight);
+        if (columns) {
+            // The extra columns are resolved rather than picked: smoothing is on
+            // for this one draw, and only the horizontal is being changed.
+            this.context.imageSmoothingEnabled = true;
+            this.context.imageSmoothingQuality = "high";
+            this.context.drawImage(columns, 0, 0, frame.width, drawHeight, left, top, drawWidth, drawHeight);
+            this.context.imageSmoothingEnabled = false;
+        } else {
+            this.context.drawImage(source, 0, 0, frame.width, frame.height, left, top, drawWidth, drawHeight);
+        }
 
         // Where it landed, so the mouse can be read back into the same pixels.
         // The frame carries the border with it and the active display sits in
@@ -315,6 +324,46 @@ export class BrowserHost implements Host {
             width: active.width,
             height: active.height
         };
+    }
+
+    /**
+     * The frame at one canvas pixel per pixel across, for the case where a
+     * whole number of them will not fit - or null where the picture goes
+     * straight to the screen, which is every square-pixel mode.
+     *
+     * **What this is for.** A 512-wide mode has twice as many columns as the
+     * screen is wide, so its pixels are drawn half as wide, and a canvas sized
+     * for the 256-wide modes has an odd number of them to give: 816 pixels
+     * across a 544-pixel frame is one and a half each. `imageSmoothingEnabled`
+     * is off everywhere else here, and nearest neighbour at one and a half
+     * keeps every other column twice - so the same stroke comes out two pixels
+     * wide in one place and three in the next. Measured over a page of
+     * 12-pixel type: runs of solid ink 1, 2 and 3 pixels long in roughly equal
+     * numbers, for a face whose stems are all the same width. That is what a
+     * 512-wide screen of small type looks bold and ragged for, and it is the
+     * presentation doing it - the pixels underneath are exact.
+     *
+     * So the vertical, which is a whole number, is done first and nearest, and
+     * the horizontal is left to a filter. Which is also what the mode is:
+     * columns finer than the display can resolve, resolved rather than chosen.
+     * Where the magnification does divide - every square-pixel mode, and a
+     * 512-wide one on a canvas sized for it - none of this happens.
+     */
+    private resolve(source: CanvasImageSource, frame: Frame, drawWidth: number, drawHeight: number): HTMLCanvasElement | null {
+        if (drawWidth % frame.width === 0) return null;
+        if (typeof document === "undefined" || typeof document.createElement !== "function") return null;
+
+        const scratch = this.scratch ?? (this.scratch = document.createElement("canvas"));
+        if (scratch.width !== frame.width || scratch.height !== drawHeight) {
+            scratch.width = frame.width;
+            scratch.height = drawHeight;
+        }
+        const context = scratch.getContext("2d");
+        if (!context) return null;
+
+        context.imageSmoothingEnabled = false;
+        context.drawImage(source, 0, 0, frame.width, frame.height, 0, 0, frame.width, drawHeight);
+        return scratch;
     }
 
     start(tick: () => void): void {

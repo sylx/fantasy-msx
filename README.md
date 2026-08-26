@@ -325,6 +325,30 @@ was running with it. While a file is over the screen the canvas carries
 `BrowserHost` to have none of it.
 
 
+## Putting the picture on the page
+
+`present` scales by the picture's **true width** rather than its pixel count: a
+512-wide mode fills the same screen as a 256-wide one, so both come out the same
+size on the page and neither is stretched. Smoothing is off, so a pixel is a
+pixel.
+
+That leaves one case worth knowing about, because it is the one that makes small
+type look bold. A 512-wide mode's pixels are half as wide, and a canvas sized in
+whole 256-wide pixels has an odd number of them to give a 544-pixel frame - 816
+across 544 is one and a half each. Nearest neighbour at one and a half keeps
+every other column twice, so a stroke comes out two pixels wide in one place and
+three in the next, and the flank the atlas so carefully thresholded is either
+promoted to full ink or dropped. Measured over a page of 12-pixel type: runs of
+solid ink 1, 2 and 3 pixels long in roughly equal numbers, for a face whose stems
+are all the same width. At a whole magnification every run is even.
+
+So where the magnification does not divide, the vertical - which always does - is
+done first and nearest, and the horizontal is left to a filter. Which is what the
+mode is anyway: columns finer than the display can resolve, resolved rather than
+picked. Every square-pixel mode, and a 512-wide one on a canvas sized for it, goes
+straight to the screen untouched.
+
+
 ## The mouse
 
 `ctx.pointer` is where the mouse is, in the machine's own pixels - the ones
@@ -773,7 +797,12 @@ is drawn. An idle screen costs nothing at all.
 
 **F1 switches the face, which switches the mode with it.** OUTLINE is the
 default and runs in SCREEN 7, where an outline face gets twice as many columns
-to put the stroke in. DOT is JF Dot K12x10 and runs in SCREEN 5, because it
+to put the stroke in - which is what keeps M and W apart at this size, and what
+a 256-wide mode cannot do. It is cut at **one coverage level** rather than the
+three the atlas can hold: at twelve dots there is no flank to resolve, and the
+grey only spreads a stroke over three pixels instead of one, which reads as a
+soft, bold face rather than a machine's. Measured over a screen of this
+document, three levels put the same ink across twice as many lit pixels. DOT is JF Dot K12x10 and runs in SCREEN 5, because it
 cannot do anything else: a bitmap face is drawn for exactly one size on exactly
 one grid, and a mode with finer pixels has nothing to spend them on. So the face
 decides the mode rather than the other way round, and the switch lays the same
@@ -787,16 +816,20 @@ until it is lent a colour, which is the honest part: the page holds coverage
 levels rather than palette indices, so the levels have to borrow exactly the
 entries the text on the other page is drawn in, and give them back afterwards.
 
-**F3 fetches the dictionary**, which is about 15MB of Mozc and is not fetched
-before it is asked for. What comes back is a preedit and a list of candidates as
-data, so the preedit sits inline where the caret is - the clause being chosen
-inverted, the rest on a colour of their own, as a FEP marked them - and the
-candidate list is the bar along the foot of the screen. It is at the foot rather
-than under the caret because a line is nineteen full-width characters and a
-popup would cover the sentence it is about, which is where Japanese MSX software
-put it for the same reason. **Space** converts and then cycles, **1 to 9** take a
-candidate straight off the bar, **Enter** settles it, and **Ctrl+Space** switches
-between kana and direct.
+**Ctrl+Space is the kana key**, and the first press of it fetches the dictionary
+- about 15MB of Mozc, and nothing is fetched before it is asked for. Every press
+after that turns conversion on and off, and the status bar says which of the two
+the next one will do, because that key is the only thing in the editor that
+cannot be found by looking at the screen.
+
+What comes back is a preedit and a list of candidates as data, so the preedit
+sits inline where the caret is - the clause being chosen inverted, the rest on a
+colour of their own, as a FEP marked them - and the candidate list is the bar
+along the foot of the screen. It is at the foot rather than under the caret
+because a line is nineteen full-width characters and a popup would cover the
+sentence it is about, which is where Japanese MSX software put it for the same
+reason. **Space** converts and then cycles, **1 to 9** take a candidate straight
+off the bar, and **Enter** settles it.
 
 The commands are on function keys because everything else is text: the keyboard
 is captured, so Z and X are letters, and keys held with ctrl or the platform key

@@ -31,7 +31,13 @@
 // **OUTLINE** is the default and runs in SCREEN 7. An outline face has no size
 // of its own, so it is cut at whatever em the cell wants, and a 512-wide mode
 // gives it twice as many columns to put the stroke in - that is what the extra
-// pixels are for.
+// pixels are for, and it is what keeps M and W apart at this size where a
+// 256-wide mode cannot.
+//
+// It is cut at **one coverage level**, not the three the atlas can hold. At
+// twelve dots there is no flank to resolve: the grey only spreads a stroke over
+// three pixels instead of one, which is a soft, bold-looking face rather than a
+// machine's. Both faces are a threshold, and both weigh the same.
 //
 // **DOT** is JF Dot K12x10 and runs in SCREEN 5, because it cannot do anything
 // else. A bitmap face is drawn for exactly one size on exactly one grid, and a
@@ -51,21 +57,27 @@
 // rather than palette indices, so the levels have to borrow exactly the entries
 // the text on the other page is drawn in.
 //
-// ## F3: conversion
+// ## Ctrl+Space: conversion
 //
-// About 15MB of Mozc, and nothing is fetched until it is asked for. What comes
-// back is a preedit and a list of candidates **as data**, so the preedit sits
-// inline where the caret is and the candidate list is the bar along the foot of
-// the screen - in the same palette, the same glyphs and the same cells as the
-// document. A host IME would have floated its own window over the canvas in the
-// system's typeface, which is a browser drawn on top of a machine.
+// The kana key, where every desktop IME puts it - and here it is also the key
+// that spends the money. **The first press fetches the dictionary**, about 15MB
+// of Mozc, and nothing is fetched before it: an app that never asks for Japanese
+// never pays. Every press after that turns conversion on and off. The status bar
+// says which of those the next press will do, because Ctrl+Space is the one
+// thing in this editor that cannot be found by looking at the screen.
+//
+// What comes back is a preedit and a list of candidates **as data**, so the
+// preedit sits inline where the caret is and the candidate list is the bar along
+// the foot of the screen - in the same palette, the same glyphs and the same
+// cells as the document. A host IME would have floated its own window over the
+// canvas in the system's typeface, which is a browser drawn on top of a
+// machine.
 //
 // ## The keys
 //
 //   F1           OUTLINE / DOT, which is SCREEN 7 / SCREEN 5
 //   F2           look at the font page
-//   F3           load the dictionary, then kana / direct
-//   Ctrl+Space   kana / direct
+//   Ctrl+Space   the dictionary, then kana / direct
 //   Space        convert, then next candidate
 //   1..9         take that candidate off the bar
 //   Enter        settle it
@@ -94,9 +106,6 @@ import { CELL_HEIGHT, DOT_CELL_WIDTH, dotStyle, loadDotFont, outlineStyle } from
 
 const PAPER = 0;
 const INK = 15;
-/** The two shades the outline face's coverage is spent on, palest first. */
-const FLANK = 13;
-const MID = 14;
 /** Line numbers, and the rule between them and the text. */
 const DIM = 11;
 const RULE = 12;
@@ -144,7 +153,8 @@ const SAMPLE = [
     "書体は SCREEN 7、ドット書体は",
     "SCREEN 5。書体が画面を決めます。",
     "",
-    "F3 で辞書を読み込みます。15MB。",
+    "Ctrl+Space で辞書を読み込みます。",
+    "15MB。押すまでは何も取りません。",
     "読み込むと、かな漢字変換ができます。",
     "変換中の候補は下の行に出ます。",
     "",
@@ -177,7 +187,6 @@ let wantCell = 0;
 let top = 0;
 let left = 0;
 let modified = false;
-let keystrokes = 0;
 /** Frame of the last keystroke, so the caret stops blinking while typing. */
 let lastKey = -100;
 /** The row the view was showing last frame, so a move of it can be a scroll. */
@@ -206,7 +215,6 @@ export const demo: App = {
         left = 0;
         shownTop = 0;
         modified = false;
-        keystrokes = 0;
         editCost = 0;
 
         dots = false;
@@ -232,7 +240,6 @@ export const demo: App = {
         // holding a key that has nothing to do with what is being typed.
         const typed: KeyEvent[] = [];
         for (const event of keyboard.take()) {
-            ++keystrokes;
             lastKey = ctx.frame;
             if (!command(ctx, event)) typed.push(event);
         }
@@ -267,11 +274,14 @@ export const demo: App = {
 
 /** True when the key was a command, and so is not text. */
 function command(ctx: Context, event: KeyEvent): boolean {
-    // Ctrl+Space is where every desktop IME puts the kana switch. The host
+    // Ctrl+Space is where every desktop IME puts the kana switch, and it is the
+    // only key here that spends anything: the first press fetches the
+    // dictionary, every press after it turns conversion on and off. The host
     // leaves ctrl combinations to the browser, so this one arrives having had
     // no effect on the page.
     if (event.ctrl && event.code === "Space") {
-        if (phase === "ready") ctx.ime.enabled = !ctx.ime.enabled;
+        if (phase === "cold") void begin(ctx);
+        else if (phase === "ready") ctx.ime.enabled = !ctx.ime.enabled;
         return true;
     }
     if (event.ctrl || event.alt || event.meta) return true;
@@ -279,10 +289,6 @@ function command(ctx: Context, event: KeyEvent): boolean {
     switch (event.code) {
         case "F1": face(ctx, !dots); return true;
         case "F2": peek(ctx, !peeking); return true;
-        case "F3":
-            if (phase === "cold") void begin(ctx);
-            else if (phase === "ready") ctx.ime.enabled = !ctx.ime.enabled;
-            return true;
     }
 
     // A number takes a candidate straight off the bar - the one thing a list
@@ -471,8 +477,6 @@ function dress(ctx: Context): void {
     ctx.screen.setMode(dots ? "G4" : "G6");
     ctx.screen.setColor(PAPER, 0, 0, 1);
     ctx.screen.setColor(INK, 7, 7, 7);
-    ctx.screen.setColor(MID, 4, 4, 5);
-    ctx.screen.setColor(FLANK, 2, 2, 3);
     ctx.screen.setColor(RULE, 2, 2, 3);
     ctx.screen.setColor(DIM, 3, 3, 4);
     ctx.screen.setColor(BAR, 1, 2, 5);
@@ -531,11 +535,18 @@ function glyphs(ctx: Context): GlyphSource {
         // A bitmap face is drawn for one size and scaling it is what ruins it;
         // an outline face has no size of its own and has to be given one.
         fit: !dots,
-        levels: dots ? 1 : 3,
-        // Coverage is only worth spending on the body text. Everything else -
-        // the bars, the inverted clause of a preedit - is a colour on a colour,
-        // and a flank drawn in the body's greys would be a halo round it.
-        ramp: (ink) => (dots || ink !== INK ? [ink, ink, ink] : [FLANK, MID, INK])
+        // One level, which is a threshold: a pixel is ink or it is paper.
+        //
+        // The atlas will spend coverage on a ramp of three, and at this size it
+        // should not. Measured on a screen of this document: the ink of a kanji
+        // comes to a third of its cell either way, but three levels put it
+        // across twice as many lit pixels - a solid stroke with a grey either
+        // side of it. That is not a flank being resolved, there is nothing at
+        // twelve dots to resolve; it is the stroke smeared over three pixels
+        // instead of one, and it reads as a bold, soft face rather than a
+        // machine's. The bitmap face has exactly one level for the same reason,
+        // and the two now weigh the same.
+        levels: 1
     });
     return atlas;
 }
@@ -557,10 +568,11 @@ function peek(ctx: Context, on: boolean): void {
 }
 
 function lendLevelsAColour(ctx: Context, on: boolean): void {
-    const ramp = dots ? [INK] : [FLANK, MID, INK];
+    // Both faces store one level, so one entry would do - but a page that held
+    // three from an earlier cut is still holding them, and a glyph half in the
+    // paper's colour is worse than one that is too bright.
     for (let level = 1; level <= 3; ++level) {
-        const entry = on ? ramp[Math.min(level, ramp.length) - 1] : level;
-        const [r, g, b] = on ? ctx.screen.palette[entry] : BOOT[level];
+        const [r, g, b] = on ? ctx.screen.palette[INK] : BOOT[level];
         ctx.screen.setColor(level, r, g, b);
     }
 }
@@ -608,7 +620,7 @@ function render(ctx: Context): void {
         paint(term, row, runsFor(index, ime));
     }
 
-    status(term);
+    status(term, ctx.ime.enabled);
     footer(ctx, term);
 
     term.locate(GUTTER + caretCell(term, ime) - left, FIRST_ROW + caretLine - top);
@@ -684,9 +696,41 @@ function title(term: Console): void {
     term.text(0, TITLE_ROW, ends(term, " UNTITLED.TXT" + (modified ? " *" : ""), right), INK, BAR);
 }
 
-function status(term: Console): void {
+/**
+ * Where the caret is, what conversion is doing, and what the last edit cost.
+ *
+ * The middle one is there because Ctrl+Space is the only thing in this editor
+ * that cannot be found by looking at the screen - the function keys have a row
+ * of labels along the foot and the kana key has nowhere to be but here. It is
+ * dropped rather than allowed to push the ends off the line, which happens
+ * around line 1000 of a modified document.
+ */
+function status(term: Console, converting: boolean): void {
     const left = ` L${caretLine + 1}/${lines.length} C${caretColumn + 1}${modified ? " MOD" : ""}`;
-    term.text(0, statusRow, ends(term, left, `KEYS ${keystrokes} EDIT ${editCost} `), INK, BAR);
+    const right = `EDIT ${editCost} `;
+    const middle = conversion(converting);
+
+    const room = term.cols - term.measure(left) - term.measure(right);
+    const width = term.measure(middle);
+    const gap = width + 2 <= room ? Math.floor((room - width) / 2) : -1;
+
+    const line = gap < 0
+        ? ends(term, left, right)
+        : left + " ".repeat(gap) + middle + " ".repeat(room - width - gap) + right;
+    term.text(0, statusRow, line, INK, BAR);
+}
+
+/** What the kana key is offering, which is not the same thing at each stage. */
+function conversion(converting: boolean): string {
+    // The ROM font has no kana, so where it is the one drawing, this says the
+    // same thing in the alphabet it does have.
+    const kana = rasteriser ? "かな漢字" : "KANA-KANJI";
+    switch (phase) {
+        case "cold": return `C-Space:${kana} 15MB`;
+        case "loading": return `${kana} ${Math.round(progress * 100)}%`;
+        case "failed": return `${kana} ${rasteriser ? "失敗" : "FAILED"}`;
+        default: return `C-Space:${kana} ${converting ? "ON" : "OFF"}`;
+    }
 }
 
 /**
@@ -740,15 +784,9 @@ function footer(ctx: Context, term: Console): void {
 function labels(): ReadonlyArray<readonly [string, string]> {
     const faceName = !rasteriser ? "ROM" : dots ? (dotFace === "ready" ? "DOT" : "DOT?") : "OUTLINE";
     // In the ROM font the labels have to be Latin, because the ROM font is
-    // Latin. A bar that reads ?? 15MB is a bar that is lying about the machine.
-    const engine = !rasteriser
-        ? (phase === "cold" ? "DICT 15MB" : phase === "loading" ? "LOADING" : phase === "failed" ? "FAILED" : "KANA")
-        : phase === "cold" ? "辞書 15MB"
-        : phase === "loading" ? "読込中"
-        : phase === "failed" ? "失敗"
-        : "かな/英";
+    // Latin. A bar that reads ?? is a bar that is lying about the machine.
     const back = rasteriser ? "戻る" : "BACK";
-    return [["F1", faceName], ["F2", peeking ? back : "VRAM"], ["F3", engine]];
+    return [["F1", faceName], ["F2", peeking ? back : "VRAM"]];
 }
 
 /** Something at each end of a row, with the bar's own colour between them. */
