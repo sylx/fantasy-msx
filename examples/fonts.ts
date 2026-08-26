@@ -19,18 +19,32 @@
 // bitmap, and the browser will happily give you one.
 //
 // What the measuring found, rendering U+56FD and counting the distinct coverage
-// values that came back:
+// values that came back (* once snapped - see below):
 //
-//   size 10, stretch 1   advance 12, half 6, ink 11x9   ONE level - crisp
+//   size 10, stretch 1   advance 12, half 6, ink 11x9   ONE level - crisp*
 //   size 12, stretch 1   advance 14                     33 levels
 //   size 20, stretch 1   advance 24                     11 levels
 //   size 10, stretch 2   advance 12                      3 levels
 //
-// Two things follow, and they decide which screen mode these examples run in.
+// Three things follow, two of which decide which screen mode these examples
+// run in and one of which decides whether the face is a bitmap at all.
 //
 // **The em is 10, not 12.** The face's full-width advance is 1.2 em, because
 // the twelve dots are wider than the ten-dot em they sit in. Ask for "12px" and
 // you get a fourteen-pixel advance and a grey mess.
+//
+// **The dots do not land on the rows by themselves.** The size settles the
+// horizontal - a dot is a pixel across, and a line is set from a whole one -
+// but the face hangs its rows 42 units below the baseline, 0.41 of a dot, so
+// at ten pixels an em every row of them straddles two of ours: 0.59 of one and
+// 0.41 of the next. Which of those lights is then a question about the
+// threshold and not about the face - and the face's own `gasp` asks the
+// browser to grid-fit above eight pixels, which rounds the straddle outwards
+// and turns one row of dots into two. That is this face arriving in bold, with
+// the dense kanji filled in solid, and it is what `snap` below is for: cut at
+// four times the size, where a rounding of that kind is a quarter of one of
+// our pixels, and folded back four rows to one. The measurements above are
+// what the face gives once it has been.
 //
 // **`stretch` has to be 1**, which rules out the 512-wide modes. Their pixels
 // are half as wide, so `text` doubles the em to keep type the right shape - and
@@ -91,7 +105,14 @@ export const dotStyle: TextStyle = {
     font: `'${DOT_FAMILY}', ${OUTLINE_FAMILY}`,
     size: DOT_SIZE,
     // Square pixels, whatever the mode thinks: this face has one grid.
-    stretch: 1
+    stretch: 1,
+    // And that grid has to land on the machine's. Across it does: a line is
+    // set from a whole pixel and the em is ten of them, so a dot is a pixel.
+    // Down it does not - this face's rows sit 0.41 of a dot below the baseline
+    // and the browser grid-fits them outwards, which is one row of dots
+    // arriving as two. `snap` is the answer: cut at four times the size and
+    // folded back, one dot to one pixel.
+    snap: true
 };
 
 /**

@@ -43,22 +43,49 @@ class FakeContext {
         };
     }
 
-    /** Horizontal scale, as `setTransform` last left it. */
+    /** Horizontal scale and vertical offset, as `setTransform` last left them. */
     scale = 1;
+    offset = 0;
 
-    setTransform(a: number): void {
+    /**
+     * How far below the baseline this face hangs its rows, as a fraction of
+     * the em - so it scales with the size, the way a real face's design does.
+     * Zero is a face on the grid; a twentieth of the em is half a pixel at ten
+     * pixels an em, which is the bitmap face this all exists for.
+     */
+    static grid = 0;
+
+    setTransform(a: number, _b = 0, _c = 0, _d = 1, _e = 0, f = 0): void {
         this.scale = a;
+        this.offset = f;
     }
 
+    clearRect(x: number, y: number, width: number, height: number): void {
+        for (let row = y; row < Math.min(this.canvas.height, y + height); ++row) {
+            this.canvas.alpha.fill(0, row * this.canvas.width + x,
+                row * this.canvas.width + Math.min(this.canvas.width, x + width));
+        }
+    }
+
+    /**
+     * A solid block where the glyphs would go, laid down as coverage rather
+     * than as ink: a row the block only half covers comes back half lit, which
+     * is what a face off the grid does to a real one and the whole of what
+     * `snap` is looking for.
+     */
     fillText(text: string, x: number, y: number): void {
         this.stamps.push({ text, x, y });
-        const top = Math.round(y - this.size * ASCENT);
-        const bottom = Math.round(y + this.size * DESCENT);
+        const shift = this.size * FakeContext.grid;
+        const top = y - this.size * ASCENT + shift + this.offset;
+        const bottom = y + this.size * DESCENT + shift + this.offset;
         const from = Math.round(x * this.scale);
         const to = Math.round((x + this.advance(text)) * this.scale);
-        for (let row = Math.max(0, top); row < Math.min(this.canvas.height, bottom); ++row) {
+        for (let row = Math.max(0, Math.floor(top)); row < Math.min(this.canvas.height, Math.ceil(bottom)); ++row) {
+            const covered = Math.max(0, Math.min(row + 1, bottom) - Math.max(row, top));
+            const value = Math.round(covered * 255);
             for (let column = Math.max(0, from); column < Math.min(this.canvas.width, to); ++column) {
-                this.canvas.alpha[row * this.canvas.width + column] = 255;
+                const at = row * this.canvas.width + column;
+                this.canvas.alpha[at] = Math.max(this.canvas.alpha[at], value);
             }
         }
     }
@@ -107,7 +134,7 @@ function stamps(): Stamp[] {
 }
 
 const style = (extra: Partial<ResolvedStyle> = {}): ResolvedStyle =>
-    ({ font: "10px sans-serif", size: 10, letterSpacing: 0, align: "left", stretch: 1, ...extra });
+    ({ font: "10px sans-serif", size: 10, letterSpacing: 0, align: "left", stretch: 1, snap: false, ...extra });
 
 beforeEach(() => { stamps().length = 0; });
 
@@ -178,5 +205,55 @@ describe("The browser rasteriser", () => {
         expect(coverage.width).toBe(1);
         expect(coverage.height).toBe(10);
         expect(stamps().length).toBe(0);
+    });
+});
+
+/**
+ * A bitmap face is only a bitmap where its own grid lands on the machine's.
+ * The fake face here hangs its rows half a pixel below the baseline at ten
+ * pixels an em, which is what the dot face does: every row of dots straddles
+ * two of ours, and a browser that grid-fits rounds that outwards into two rows
+ * of ink. `snap` cuts the face four times as big, where a rounding of that
+ * kind is a quarter of one of our pixels, and folds it back four rows to one
+ * on the seam that lands the face's grid on ours.
+ */
+describe("Cutting a bitmap face", () => {
+    beforeEach(() => { FakeContext.grid = 0.05; });          // half a pixel at ten
+    afterAll(() => { FakeContext.grid = 0; });
+
+    /** Coverage that is neither ink nor paper, which is what a face off the grid leaves. */
+    const grey = (coverage: { alpha: Uint8Array | Uint8ClampedArray }) =>
+        [...coverage.alpha].filter((value) => value > 16 && value < 239).length;
+
+    it("leaves a face off the grid half covered where it is not asked to snap", () => {
+        expect(grey(rasteriseWithCanvas("abcd", style()))).toBeGreaterThan(0);
+    });
+
+    it("cuts the face at four times the size and folds it back", () => {
+        const coverage = rasteriseWithCanvas("abcd", style({ snap: true }));
+        // One rasterisation, at four times the em: the folding is arithmetic.
+        expect(stamps().length).toBe(1);
+        expect(canvases[0].context.font).toBe("40px sans-serif");
+        expect(coverage.width).toBe(20);                    // the box is the box
+        expect(coverage.baseline).toBe(8);
+    });
+
+    it("folds on the seam that lands the face's rows on whole pixels", () => {
+        const coverage = rasteriseWithCanvas("abcd", style({ snap: true }));
+        expect(grey(coverage)).toBe(0);
+        // Half a pixel low is a whole row low once it is on the grid, so the
+        // spare row is where the last of the ink went.
+        expect(coverage.height).toBe(11);
+        expect(coverage.alpha[0]).toBe(0);
+        expect(coverage.alpha[coverage.width]).toBe(255);
+        expect(coverage.alpha[coverage.width * 10]).toBe(255);
+    });
+
+    it("keeps the box it had where the face is already on the grid", () => {
+        FakeContext.grid = 0;
+        const coverage = rasteriseWithCanvas("abcd", style({ snap: true }));
+        expect(coverage.height).toBe(10);
+        expect(grey(coverage)).toBe(0);
+        expect(coverage.alpha[0]).toBe(255);
     });
 });

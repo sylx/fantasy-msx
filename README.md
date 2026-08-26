@@ -287,6 +287,20 @@ style gives type of the same shape with twice the detail across it. `stretch`
 overrides that - 1 to work in the mode's own pixels, anything else to condense
 or extend deliberately.
 
+**`snap` is for a face that is already a bitmap.** Such a face is only crisp
+where its own grid lands on the machine's, and at the size it was drawn for two
+things stop that. The face may hang its rows off the baseline - JF Dot K12x10
+puts its dots 0.41 of a dot low, so at ten pixels an em every row of them
+straddles two of ours. And the browser grid-fits: that face's `gasp` asks for
+it above eight pixels, so the rasteriser rounds the straddle onto the pixels,
+outwards, and one row of dots arrives as two. That is a bitmap face rendered
+bold with its dense characters filled in solid, and no threshold downstream can
+undo it - by then both rows are honestly covered. So `snap: true` cuts the face
+at four times the size, where a rounding of that kind moves an edge a quarter
+of one of our pixels, and folds it back four rows to one on the seam that lands
+the face's grid on ours. Only a bitmap face wants it; an outline face is grey
+by design.
+
 Rendering is the expensive half, so the last hundred or so results are kept:
 a caption redrawn every frame costs one layout and then nothing. `text.forget()`
 drops them, which is what a late-arriving font needs (`load` and `ready` do it
@@ -535,19 +549,23 @@ there for the same reason: a bitmap grid is rarely half its own height.
 
 ```ts
 new VramAtlas(vdp, screen, text, {
-    style: { font: "'JF Dot K12x10', monospace", size: 10, stretch: 1 },
+    style: { font: "'JF Dot K12x10', monospace", size: 10, stretch: 1, snap: true },
     cellWidth: 6, cellHeight: 12,     // the grid the face was drawn on
     fit: false, levels: 1             // one size, one coverage level
 });
 ```
 
-Two measured facts about that particular face, because they are the sort that
+Three measured facts about that particular face, because they are the sort that
 cost an afternoon. Its full-width advance is **1.2 em** - twelve dots across an
-em ten tall - so the size that gives twelve pixels is 10, not 12. And `stretch`
+em ten tall - so the size that gives twelve pixels is 10, not 12. `stretch`
 has to be 1, which **rules out the 512-wide modes**: their pixels are half as
 wide, so `text` draws the em twice as wide to keep type the right shape, and
 doubling an outline is not doubling a bitmap. A bitmap face cannot spend finer
-pixels on anything; it has one size, and that size wants square ones.
+pixels on anything; it has one size, and that size wants square ones. And its
+rows do not land on the machine's by themselves - they sit 0.41 of a dot below
+the baseline and the browser grid-fits them outwards, which is one row of dots
+arriving as two. That is what `snap: true` is doing up there; without it the
+whole face comes out a stroke too heavy and the dense kanji fill in solid.
 
 **Two cells for the wide ones.** `charCells` is Unicode's East Asian Width: the
 kana and kanji take two, half-width katakana take one. The console counts in
@@ -798,12 +816,12 @@ is drawn. An idle screen costs nothing at all.
 **F1 switches the face, which switches the mode with it.** OUTLINE is the
 default and runs in SCREEN 7, where an outline face gets twice as many columns
 to put the stroke in - which is what keeps M and W apart at this size, and what
-a 256-wide mode cannot do. It is cut at **one coverage level** rather than the
-three the atlas can hold: at twelve dots there is no flank to resolve, and the
-grey only spreads a stroke over three pixels instead of one, which reads as a
-soft, bold face rather than a machine's. Measured over a screen of this
-document, three levels put the same ink across twice as many lit pixels. DOT is JF Dot K12x10 and runs in SCREEN 5, because it
-cannot do anything else: a bitmap face is drawn for exactly one size on exactly
+a 256-wide mode cannot do. It is cut at **three coverage levels**, which is two
+palette entries spent on antialiasing: an outline this small has no edge a
+threshold can find, so the flank goes into two shades of the paper's own blue
+and the stroke keeps its weight along its length. Two of sixteen registers is
+what that costs, and saying so is the point. DOT is JF Dot K12x10 and runs in
+SCREEN 5, because it cannot do anything else: a bitmap face is drawn for exactly one size on exactly
 one grid, and a mode with finer pixels has nothing to spend them on. So the face
 decides the mode rather than the other way round, and the switch lays the same
 document out on the same 42 by 17 grid either way. One of them is the machine's

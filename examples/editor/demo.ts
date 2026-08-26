@@ -34,10 +34,12 @@
 // pixels are for, and it is what keeps M and W apart at this size where a
 // 256-wide mode cannot.
 //
-// It is cut at **one coverage level**, not the three the atlas can hold. At
-// twelve dots there is no flank to resolve: the grey only spreads a stroke over
-// three pixels instead of one, which is a soft, bold-looking face rather than a
-// machine's. Both faces are a threshold, and both weigh the same.
+// It is cut at **three coverage levels**, which is two palette entries spent on
+// antialiasing. An outline at this size has no edge a threshold can find, so
+// the flank goes into two shades of the paper's blue and the stroke keeps its
+// weight; the two registers are what that costs, and sixteen is the budget it
+// comes out of. The dot face is the opposite case and is cut at one level -
+// its dots are the picture, and there is nothing between them to resolve.
 //
 // **DOT** is JF Dot K12x10 and runs in SCREEN 5, because it cannot do anything
 // else. A bitmap face is drawn for exactly one size on exactly one grid, and a
@@ -106,6 +108,9 @@ import { CELL_HEIGHT, DOT_CELL_WIDTH, dotStyle, loadDotFont, outlineStyle } from
 
 const PAPER = 0;
 const INK = 15;
+/** The two shades the outline face's coverage is spent on, palest first. */
+const FLANK = 13;
+const MID = 14;
 /** Line numbers, and the rule between them and the text. */
 const DIM = 11;
 const RULE = 12;
@@ -477,6 +482,8 @@ function dress(ctx: Context): void {
     ctx.screen.setMode(dots ? "G4" : "G6");
     ctx.screen.setColor(PAPER, 0, 0, 1);
     ctx.screen.setColor(INK, 7, 7, 7);
+    ctx.screen.setColor(MID, 4, 4, 5);
+    ctx.screen.setColor(FLANK, 2, 2, 3);
     ctx.screen.setColor(RULE, 2, 2, 3);
     ctx.screen.setColor(DIM, 3, 3, 4);
     ctx.screen.setColor(BAR, 1, 2, 5);
@@ -535,18 +542,25 @@ function glyphs(ctx: Context): GlyphSource {
         // A bitmap face is drawn for one size and scaling it is what ruins it;
         // an outline face has no size of its own and has to be given one.
         fit: !dots,
-        // One level, which is a threshold: a pixel is ink or it is paper.
+        // Three levels for the outline face, one for the dot face, which is the
+        // difference between them said in memory.
         //
-        // The atlas will spend coverage on a ramp of three, and at this size it
-        // should not. Measured on a screen of this document: the ink of a kanji
-        // comes to a third of its cell either way, but three levels put it
-        // across twice as many lit pixels - a solid stroke with a grey either
-        // side of it. That is not a flank being resolved, there is nothing at
-        // twelve dots to resolve; it is the stroke smeared over three pixels
-        // instead of one, and it reads as a bold, soft face rather than a
-        // machine's. The bitmap face has exactly one level for the same reason,
-        // and the two now weigh the same.
-        levels: 1
+        // An outline cut at twelve pixels has no edge the machine can hold: the
+        // browser hands back coverage and a threshold throws all of it away,
+        // which leaves a stem that is one pixel here and two there. So the
+        // coverage is spent - two shades of the paper's own blue under the ink,
+        // and the stroke keeps its weight along its whole length. It costs two
+        // palette entries, which is what antialiasing costs on this machine and
+        // the honest way to say so.
+        //
+        // The bitmap face is the other case entirely. Its dots are the picture,
+        // there is nothing between them to resolve, and a ramp would only smear
+        // each one over its neighbours. One level, which is a threshold.
+        levels: dots ? 1 : 3,
+        // Coverage is only worth spending on the body text. Everything else -
+        // the bars, the inverted clause of a preedit - is a colour on a colour,
+        // and a flank drawn in the body's greys would be a halo round it.
+        ramp: (ink) => (dots || ink !== INK ? [ink, ink, ink] : [FLANK, MID, INK])
     });
     return atlas;
 }
@@ -568,11 +582,15 @@ function peek(ctx: Context, on: boolean): void {
 }
 
 function lendLevelsAColour(ctx: Context, on: boolean): void {
-    // Both faces store one level, so one entry would do - but a page that held
-    // three from an earlier cut is still holding them, and a glyph half in the
-    // paper's colour is worse than one that is too bright.
+    // Exactly the entries the text on the other page is drawn in, so what the
+    // page looks like here is what it looks like there. The dot face stores one
+    // level and the outline face three, and a page cut in one and looked at
+    // after a switch to the other would be lit in the wrong greys - which is
+    // why this reads the ramp rather than remembering it.
+    const ramp = dots ? [INK] : [FLANK, MID, INK];
     for (let level = 1; level <= 3; ++level) {
-        const [r, g, b] = on ? ctx.screen.palette[INK] : BOOT[level];
+        const entry = on ? ramp[Math.min(level, ramp.length) - 1] : level;
+        const [r, g, b] = on ? ctx.screen.palette[entry] : BOOT[level];
         ctx.screen.setColor(level, r, g, b);
     }
 }

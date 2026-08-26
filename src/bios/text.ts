@@ -81,6 +81,34 @@ export interface TextStyle {
      * the mode's own pixels instead, and anything else to condense or extend.
      */
     stretch?: number;
+    /**
+     * Whether this face is a bitmap, and is to be cut as one. No use to any
+     * other kind, and worth understanding before it is turned on.
+     *
+     * A bitmap face is only a bitmap where its own grid lands on ours, and at
+     * the size it was drawn for, two things stop that happening.
+     *
+     * The face may not hang its dots off the baseline. JF Dot K12x10 puts its
+     * rows at 102.4 units apart starting 42 below the baseline, so at ten
+     * pixels an em every row of dots straddles two of ours - 0.59 of one and
+     * 0.41 of the next. Which of them lights is then a question about the
+     * threshold rather than about the face.
+     *
+     * And the browser grid-fits. This face's `gasp` asks for it at anything
+     * above eight pixels, so the rasteriser rounds those straddling edges onto
+     * the pixels - outwards, which turns one row of dots into two. That is a
+     * bitmap face arriving bold, with the dense characters filled in solid, and
+     * no threshold or nudge downstream can undo it: by then the two rows are
+     * equally and honestly covered.
+     *
+     * So the face is cut at four times the size instead, where a hint that
+     * rounds an edge moves it a quarter of one of our pixels, and folded back
+     * four rows to one. The fold has four places to put its seam and the one
+     * with the least grey either side of it is the one that lands the face's
+     * grid on ours. It costs one rasterisation of sixteen times the area, once
+     * per glyph, which is what a cache is for.
+     */
+    snap?: boolean;
 }
 
 /** A style with every question answered, which is what the rasteriser is handed. */
@@ -94,6 +122,8 @@ export interface ResolvedStyle {
     readonly align: TextAlign;
     /** Horizontal scale, for the modes whose pixels are not square. */
     readonly stretch: number;
+    /** Whether to cut this face as the bitmap it is: oversized, then folded down. */
+    readonly snap: boolean;
 }
 
 /** What the host hands back: coverage per pixel, and where the type sits in it. */
@@ -131,6 +161,14 @@ export interface TextImage extends TextBox {
 
 /** Rendered strings worth keeping, since a HUD asks for the same one every frame. */
 const CACHE_LIMIT = 128;
+
+/**
+ * How much bigger a bitmap face is cut than it is used, so that the browser's
+ * grid-fitting lands inside one of our pixels rather than on top of it. Four
+ * is enough: a hint moves an edge by at most half a pixel of its own, which is
+ * an eighth of ours, and the fold has four phases to choose between.
+ */
+const ZOOM = 4;
 
 export class Typesetter {
     /**
@@ -171,7 +209,7 @@ export class Typesetter {
         const threshold = merged.threshold ?? 128;
 
         const key = `${resolved.font}|${resolved.lineHeight ?? ""}|${resolved.letterSpacing}|${resolved.align}`
-            + `|${resolved.stretch}`
+            + `|${resolved.stretch}|${resolved.snap}`
             + `|${ramp.join(",")}|${background ?? ""}|${threshold} ${text}`;
         const hit = this.cache.get(key);
         if (hit) {
@@ -274,7 +312,8 @@ function resolve(style: TextStyle, stretch: number): ResolvedStyle {
         lineHeight: style.lineHeight,
         letterSpacing: style.letterSpacing ?? 0,
         align: style.align ?? "left",
-        stretch: style.stretch ?? stretch
+        stretch: style.stretch ?? stretch,
+        snap: style.snap ?? false
     };
 }
 
@@ -382,35 +421,125 @@ export function rasteriseWithCanvas(text: string, style: ResolvedStyle): Coverag
     const width = Math.max(1, Math.ceil((left + right) * style.stretch));
     const height = Math.max(1, baseline + Math.ceil(descent) + (lines.length - 1) * lineHeight);
 
-    ctx.canvas.width = width;
-    ctx.canvas.height = height;
-    apply(ctx, style);                                  // the resize wiped all of it
-    ctx.setTransform(style.stretch, 0, 0, 1, 0, 0);     // wider pixels, the same em
+    /**
+     * Where a line starts: its own overhang, shifted by however much narrower
+     * than the box the line came out. Rounded in the pixels it will land in,
+     * and taken back through the scale by whoever draws it.
+     */
+    const origin = (i: number): number => {
+        const slack = width - (extents[i].left + extents[i].right) * style.stretch;
+        const indent = style.align === "center" ? slack / 2 : style.align === "right" ? slack : 0;
+        return Math.round(extents[i].left * style.stretch + indent);
+    };
+
+    if (!style.snap) {
+        ctx.canvas.width = width;
+        ctx.canvas.height = height;
+        apply(ctx, style);                              // the resize wiped all of it
+        ctx.setTransform(style.stretch, 0, 0, 1, 0, 0); // wider pixels, the same em
+        ctx.textBaseline = "alphabetic";
+        ctx.fillStyle = "#fff";
+
+        for (let i = 0; i < lines.length; ++i) {
+            if (lines[i] === "") continue;
+            ctx.fillText(lines[i], origin(i) / style.stretch, baseline + i * lineHeight);
+        }
+        return { width, height, alpha: read(ctx, width, height), baseline, lineHeight };
+    }
+
+    // --- A bitmap face, cut where the grid-fitting cannot reach it ---------
+    //
+    // Four times the size, so a hint that moves an edge moves it a quarter of
+    // one of our pixels, and then folded back four to one. A spare row above
+    // and below is the room the fold's phases need, and one spare row is
+    // handed back with the box in case the phase pushed ink into it.
+    const rows = height + 1;
+    const fineWidth = width * ZOOM;
+    const fineRows = (rows + 1) * ZOOM;
+
+    ctx.canvas.width = fineWidth;
+    ctx.canvas.height = fineRows;
+    apply(ctx, style, ZOOM);                            // the resize wiped all of it
+    ctx.setTransform(style.stretch, 0, 0, 1, 0, 0);
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#fff";
 
     for (let i = 0; i < lines.length; ++i) {
         if (lines[i] === "") continue;
-        // The origin is where the line's own overhang starts, shifted by
-        // however much narrower than the box this line came out. Rounded in
-        // the pixels it will land in, then taken back through the scale.
-        const slack = width - (extents[i].left + extents[i].right) * style.stretch;
-        const indent = style.align === "center" ? slack / 2 : style.align === "right" ? slack : 0;
-        const origin = Math.round(extents[i].left * style.stretch + indent);
-        ctx.fillText(lines[i], origin / style.stretch, baseline + i * lineHeight);
+        // A row lower than the box wants it, which is the margin the fold
+        // takes its phases out of.
+        ctx.fillText(lines[i], origin(i) * ZOOM / style.stretch, (baseline + 1 + i * lineHeight) * ZOOM);
+    }
+    const fine = read(ctx, fineWidth, fineRows);
+
+    /** Four rows of the fine raster to one of ours, starting `phase` rows up. */
+    const fold = (phase: number): Uint8Array => {
+        const folded = new Uint8Array(width * rows);
+        for (let y = 0; y < rows; ++y) {
+            const top = (y + 1) * ZOOM - phase;
+            for (let x = 0; x < width; ++x) {
+                let sum = 0;
+                for (let dy = 0; dy < ZOOM; ++dy) {
+                    const at = (top + dy) * fineWidth + x * ZOOM;
+                    for (let dx = 0; dx < ZOOM; ++dx) sum += fine[at + dx];
+                }
+                folded[y * width + x] = Math.round(sum / (ZOOM * ZOOM));
+            }
+        }
+        return folded;
+    };
+
+    // The face's rows sit where they sit; the fold has four places to put its
+    // seam and one of them is between them rather than across them. The one
+    // that comes back nearest to ink and paper is that one.
+    let alpha = fold(0);
+    let least = smudge(alpha);
+    for (let phase = 1; phase < ZOOM && least > 0; ++phase) {
+        const tried = fold(phase);
+        const score = smudge(tried);
+        if (score < least) {
+            least = score;
+            alpha = tried;
+        }
     }
 
-    // White on nothing: the alpha channel is the coverage, and the other three
-    // say no more than it does.
+    // The spare row goes back only if the fold left something in it.
+    let used = rows;
+    while (used > height && alpha.subarray((used - 1) * width, used * width).every((value) => value === 0)) --used;
+
+    return { width, height: used, alpha: alpha.subarray(0, width * used), baseline, lineHeight };
+}
+
+/** The alpha channel of what was drawn: white on nothing, so it is the coverage. */
+function read(ctx: CanvasRenderingContext2D, width: number, height: number): Uint8Array {
     const rgba = ctx.getImageData(0, 0, width, height).data;
     const alpha = new Uint8Array(width * height);
     for (let i = 0; i < alpha.length; ++i) alpha[i] = rgba[i * 4 + 3];
-
-    return { width, height, alpha, baseline, lineHeight };
+    return alpha;
 }
 
-function apply(ctx: CanvasRenderingContext2D, style: ResolvedStyle): void {
-    ctx.font = style.font;
+/**
+ * How far the raster is from being ink and paper and nothing else, which is
+ * what the fold minimises. Counting the grey pixels would not do it: a seam a
+ * quarter of a pixel out leaves as many of them as one half a pixel out, and
+ * only the second is a face on the wrong side of the threshold. So each pixel
+ * is asked how far it is from the nearer of the two, and the answers are
+ * added: zero is a bitmap, and lower is nearer to one.
+ */
+function smudge(alpha: Uint8Array): number {
+    let total = 0;
+    for (const value of alpha) total += Math.min(value, 255 - value);
+    return total;
+}
+
+/**
+ * Sets the face, optionally at a multiple of its size - which is how a bitmap
+ * face is cut somewhere the browser's grid-fitting cannot distort it. The size
+ * is the one `resolve` put in the shorthand, so replacing the first of them is
+ * replacing that and nothing else.
+ */
+function apply(ctx: CanvasRenderingContext2D, style: ResolvedStyle, zoom = 1): void {
+    ctx.font = zoom === 1 ? style.font : style.font.replace(`${style.size}px`, `${style.size * zoom}px`);
     // Recent everywhere, and it must be set before measuring to be counted.
-    if ("letterSpacing" in ctx) ctx.letterSpacing = `${style.letterSpacing}px`;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = `${style.letterSpacing * zoom}px`;
 }
