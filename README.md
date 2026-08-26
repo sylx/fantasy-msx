@@ -951,6 +951,67 @@ out as question marks - which is exactly what a ROM font has to say about it,
 and the reason the atlas exists.
 
 
+### EMMY
+
+An eighties conversation game, with both halves borrowed from the browser.
+
+The screen is three bands and there is no fourth: a masthead, a cut-out of her
+on a couch, and one line you type into. That is not a style - it is what a
+Japanese adventure game on a machine this size *had* to be, because 212 lines
+divided by a twelve-dot cell is seventeen rows and the picture has already
+taken nine of them.
+
+The palette is where the arithmetic shows. Five registers are held back before
+the picture's own sixteen are counted, so the photograph gets eleven and the
+interface gets five - and one of the five is doing two jobs. `FLANK` is the
+palest step of the ramp the type's antialiasing is spent on, *and* it is the
+paper of the input field and of her speech balloon. A glyph standing on either
+of them puts its softest pixels on exactly the colour behind it, so the field
+costs no extra register and the halo a ramp would otherwise draw round every
+stroke on a coloured bar is simply not there.
+
+The picture and the grid share the screen without a clip rectangle, which is
+worth knowing if you want to do it yourself. The console is flushed **once**,
+while the screen really is empty: after that its shadow buffer agrees with the
+framebuffer, every cell outside the panel is clean for good, and nothing has
+any reason to touch the bitmap under them again. The row the picture's last two
+lines fall in is simply never written to.
+
+**Ctrl+Space** is the kana key and fetches Mozc, as in EDITOR - the preedit
+stands inline in the field and the candidates are the bar under it, in the same
+cells and the same five registers as everything else.
+
+**F1 wakes her.** Chrome ships a language model with the browser and hands it
+over through [`LanguageModel`](https://developer.chrome.com/docs/ai/prompt-api),
+which is the same bargain the rest of this machine strikes with its host: the
+fonts come from the page, the pictures are decoded by the page, and now the
+words she says are thought by the page. Nothing crosses a network.
+
+It is behind a key for the same reason the dictionary is. The model is measured
+in gigabytes, and a demo that began fetching one because somebody typed a
+letter would be spending someone else's disk without asking - so the example
+only ever asks whether the model is *already* here, which is free, and F1 is
+the call that spends. Where it is here already, waking her is a session and no
+download at all.
+
+She answers in a balloon over the left of the picture, because that is where
+there is room: her head is about seven tenths of the way across it and the rest
+is couch. The reply is streamed, so the balloon fills a few characters at a
+time - which is what this machine looked like doing anything - and the box is a
+fixed rectangle so that filling it repaints its inside rather than putting the
+artwork back under itself every few characters. Escape puts the balloon away,
+and the picture is drawn again from the reduced copy still in memory.
+
+**She remembers nothing.** Every question goes to a `clone` of a session
+holding the persona and no conversation at all: partly the built-in model's
+small context, and mostly the right amount of memory for a game of this kind.
+`examples/emmy/mind.ts` is the only file that knows the Prompt API exists.
+
+Outside a browser there is no rasteriser and no model. The field still takes
+typing, the balloon still opens, and both of them say so in the 6x8 ROM font -
+where the Japanese is a row of question marks, as it has to be.
+
+
 ### LOOM
 
 A composing machine, and a mixing desk to hear it through. There is no MML in

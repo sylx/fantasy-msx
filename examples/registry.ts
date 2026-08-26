@@ -49,6 +49,13 @@ export const EXAMPLES: readonly Example[] = [
         load: async () => (await import("./editor/demo.js")).demo
     },
     {
+        id: "emmy",
+        title: "EMMY",
+        summary: "An eighties conversation game, with both halves borrowed from the browser. SCREEN 7: a masthead, a cut-out given eleven of the sixteen registers, and a line you type into - the other five registers are the interface, and one of them is the palest step of the type's antialiasing doing double duty as the paper of the field and of her speech balloon. Ctrl+Space fetches Mozc for the kana, F1 wakes Chrome's built-in model for the answers, and both of them draw inside the machine: the candidate bar is cells, and Emmy's reply is type set into a balloon over the couch. She remembers nothing between questions, which is the right amount for a game of this kind.",
+        controls: "type \u00b7 F1 to wake her \u00b7 Ctrl+Space for the dictionary, then kana or direct \u00b7 Space converts, 1-9 take a candidate \u00b7 Enter sends, Escape puts the balloon away \u00b7 arrows, Home / End, Backspace, Delete",
+        load: async () => (await import("./emmy/demo.js")).demo
+    },
+    {
         id: "loom",
         title: "LOOM",
         summary: "A composing machine. The chords come out of a Markov chain over scale degrees, the tune is a motif walked across them, and a sequencer on the vertical interrupt hands the lot to the chips a sixteenth at a time - four FM voices, the OPLL's rhythm mode, and the PSG doing the arpeggio, the echo and the hi-hat. The desk along the bottom is worked with the mouse: every part has the chip's own level, its own voice and a mute.",
