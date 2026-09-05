@@ -1,9 +1,9 @@
-// A reproducible visit: the untouched island, planted seeds, rain, and night.
+// A reproducible visit: seeds, rain, a visiting bird, night, and a new island.
 // Also record both actual sound chips, so the garden can be heard headlessly.
 import { writeFileSync } from "node:fs";
 import { AudioMixer, BUTTON, MOUSE, boot } from "../src/index.js";
 import { createSeedDemo } from "../examples/seed/demo.js";
-import { position } from "../examples/seed/garden.js";
+import { Garden, position } from "../examples/seed/garden.js";
 import { readFrame, tile } from "./capture.js";
 import { encodePNG } from "./png.js";
 import { encodeWAV } from "./wav.js";
@@ -23,8 +23,11 @@ const step = (frames: number) => {
 const shot = () => readFrame(runtime.bios.system.machine, runtime.screen.pixelAspect);
 step(60);
 const shots = [shot()];
-for (const [x, y] of [[4, 5], [5, 5], [6, 5], [4, 6], [5, 6], [6, 6], [7, 6], [3, 7], [4, 7], [5, 7], [6, 7], [7, 7]]) {
-    const p = position({ x, y });
+const garden = new Garden();
+const empty = garden.plots.filter(plot => !plot.pond && !plot.age)
+    .sort((a, b) => (a.x - 5) ** 2 + (a.y - 6) ** 2 - (b.x - 5) ** 2 - (b.y - 6) ** 2);
+for (const plot of empty.slice(0, 20)) {
+    const p = position(plot);
     runtime.pointer.setPosition(p.x, p.y);
     runtime.pointer.setButton(MOUSE.LEFT, true);
     step(1);
@@ -38,7 +41,15 @@ step(1);
 runtime.input.setButton(BUTTON.B, false);
 step(240);
 shots.push(shot());
-step(1440 - runtime.frame);
+const birdAttribute = runtime.screen.spriteTables.attributes + 4;
+while (runtime.bios.system.vdp.vram[birdAttribute] === 213 && runtime.frame < 1200) step(1);
+step(150);                          // see the bird perched, after its approach
+shots.push(shot());
+step(Math.max(0, 1440 - runtime.frame));
+shots.push(shot());
+runtime.input.setKey("KeyR", true);
+step(1);
+runtime.input.releaseAll();
 shots.push(shot());
 
 const sheet = tile(shots, 2);
@@ -50,4 +61,4 @@ if (process.argv[3]) {
     writeFileSync(process.argv[3], encodeWAV(samples, 48000));
 }
 runtime.stop();
-console.log(`${out}: four garden frames; ${audio.length / 60}s of PSG / FM audio${process.argv[3] ? ` in ${process.argv[3]}` : " (pass a second path to save WAV)"}`);
+console.log(`${out}: six garden frames; ${(audio.length / 60).toFixed(2)}s of PSG / FM audio${process.argv[3] ? ` in ${process.argv[3]}` : " (pass a second path to save WAV)"}`);

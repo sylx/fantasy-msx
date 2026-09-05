@@ -770,21 +770,26 @@ worlds simulated in TypeScript, given the colour, sound and pace of an MSX2.
 **Z** or a click plants a seed; **X** calls the rain. Wet seeds become trees,
 trees spread into wet neighbours, and insects return. The trees' positions
 make a pentatonic FM melody; a growing forest adds harmony and answering
-voices, with PSG birds and rain. There is no score or deadline.
+voices, with PSG birds and rain. Crowded or parched trees fade, die and decay
+into moisture-retaining soil; thinning a tree with **Z** gives its neighbours
+room to recover. Birds occasionally land, carry a seed across a gap, and leave.
+Trees also have varied lifespans, so a forest keeps making room for new growth.
+There is no score or deadline.
 
 The landscape is SCREEN 5, drawn at the blitter's authentic speed on a hidden
-page and flipped only when complete. Cursor, insects and raindrops are hardware
+page and flipped only when complete. Cursor, birds, insects and raindrops are hardware
 sprites moving at 60Hz through the wait. A 48-second day changes the palette
 registers, without repainting the world. Only the boot picture and the small
 interface use immediate drawing. No external assets or services are needed.
 
 Leave it alone for eight seconds and it tends itself; any action hands the
 garden to you. **Arrows / WASD** select ground along the island's grid axes,
-**R** starts fresh, and the bottom labels are clickable. There is no saved
+**R** generates another island, with a different outline, pond, stream and
+starting trees. The bottom labels are clickable. There is no saved
 state. Open `/#seed`, or see [the demo's notes](examples/seed/README.md).
 
 ```sh
-npm run seed -- /tmp/seed.png /tmp/seed.wav  # four views and 24 seconds of chip audio
+npm run seed -- /tmp/seed.png /tmp/seed.wav  # six views and about 24 seconds of chip audio
 ```
 
 ### INK

@@ -16,8 +16,8 @@ export const EXAMPLES: readonly Example[] = [
     {
         id: "seed",
         title: "SEED",
-        summary: "A little floating garden. Plant seeds, call the rain, and listen as roots become a forest and the forest becomes a song. Trees spread into wet ground, insects return, and day slips into night through the palette registers. The landscape takes the blitter's time; life keeps moving in hardware sprites. Leave it alone for eight seconds to watch it tend itself, or join in any time. No downloads or services needed.",
-        controls: "arrows / WASD to choose a patch · Z or click to plant · X or right-click for rain · R for a fresh island · the labels at the bottom are clickable",
+        summary: "A little floating garden. Plant seeds, call the rain, and listen as roots become a forest and the forest becomes a song. Each island has its own shoreline, pond and stream. Crowded trees fade, dead wood becomes soil, and visiting birds carry seeds across gaps. Thin a tree to give its neighbours room; rain rescues dry roots. Day slips into night through the palette registers. The landscape takes the blitter's time; life keeps moving in hardware sprites. Leave it alone for eight seconds to watch it tend itself, or join in any time. No downloads or services needed.",
+        controls: "arrows / WASD to choose a patch · Z or click to plant / thin / clear · X or right-click for rain · R to generate another island · the labels at the bottom are clickable",
         load: async () => (await import("./seed/demo.js")).demo
     },
     {
