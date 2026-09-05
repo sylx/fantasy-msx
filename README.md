@@ -763,6 +763,30 @@ npm run dev
 The page is a launcher: each example gets a machine of its own, and the one on
 screen is in the URL fragment. `examples/registry.ts` is the list.
 
+### SEED
+
+A small floating garden to tend, and a possible direction for the console:
+worlds simulated in TypeScript, given the colour, sound and pace of an MSX2.
+**Z** or a click plants a seed; **X** calls the rain. Wet seeds become trees,
+trees spread into wet neighbours, and insects return. The trees' positions
+make a pentatonic FM melody; a growing forest adds harmony and answering
+voices, with PSG birds and rain. There is no score or deadline.
+
+The landscape is SCREEN 5, drawn at the blitter's authentic speed on a hidden
+page and flipped only when complete. Cursor, insects and raindrops are hardware
+sprites moving at 60Hz through the wait. A 48-second day changes the palette
+registers, without repainting the world. Only the boot picture and the small
+interface use immediate drawing. No external assets or services are needed.
+
+Leave it alone for eight seconds and it tends itself; any action hands the
+garden to you. **Arrows / WASD** select ground along the island's grid axes,
+**R** starts fresh, and the bottom labels are clickable. There is no saved
+state. Open `/#seed`, or see [the demo's notes](examples/seed/README.md).
+
+```sh
+npm run seed -- /tmp/seed.png /tmp/seed.wav  # four views and 24 seconds of chip audio
+```
+
 ### INK
 
 A game, because the machine's oddities only make sense once something is built

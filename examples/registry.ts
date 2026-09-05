@@ -14,6 +14,13 @@ export interface Example {
 
 export const EXAMPLES: readonly Example[] = [
     {
+        id: "seed",
+        title: "SEED",
+        summary: "A little floating garden. Plant seeds, call the rain, and listen as roots become a forest and the forest becomes a song. Trees spread into wet ground, insects return, and day slips into night through the palette registers. The landscape takes the blitter's time; life keeps moving in hardware sprites. Leave it alone for eight seconds to watch it tend itself, or join in any time. No downloads or services needed.",
+        controls: "arrows / WASD to choose a patch · Z or click to plant · X or right-click for rain · R for a fresh island · the labels at the bottom are clickable",
+        load: async () => (await import("./seed/demo.js")).demo
+    },
+    {
         id: "ink",
         title: "INK",
         summary: "A game. Shots fly off in the direction you are flying and burst into a gradient of ink where they land. Painted ground kills the drifters, but the blitter takes several frames to lay a splat down, so you shoot at where they are going.",

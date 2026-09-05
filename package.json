@@ -17,7 +17,8 @@
     "wire": "vite-node tools/wire.ts",
     "haze": "vite-node tools/haze.ts",
     "loom": "vite-node tools/loom.ts",
-    "editor": "vite-node tools/editor.ts"
+    "editor": "vite-node tools/editor.ts",
+    "seed": "vite-node tools/seed.ts"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
