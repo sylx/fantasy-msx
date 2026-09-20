@@ -85,6 +85,34 @@ describe("Raster shapes", () => {
         expect(gfx.getPixel(40, 29)).toBe(0);
     });
 
+    it("rounds fractional coordinates to the nearest pixel", () => {
+        const { gfx } = createBios();
+        gfx.now.clear(0);
+
+        // A caller working positions out with sin and cos lands between pixels.
+        // The line used to step towards an endpoint it could never equal and
+        // never returned, so this test hangs rather than fails if that comes back.
+        gfx.now.line(0, 0, 100.5, 50.5, 12);
+        expect(gfx.getPixel(0, 0)).toBe(12);
+        expect(gfx.getPixel(101, 51)).toBe(12);     // 100.5 rounds away from zero
+
+        gfx.now.pixel(10.4, 20.6, 7);
+        expect(gfx.getPixel(10, 21)).toBe(7);
+
+        // The packing takes its shift from the coordinate, so a fraction there
+        // used to corrupt the pixel sharing the byte.
+        gfx.now.clear(0);
+        gfx.now.hline(4.5, 3, 2.4, 9);
+        expect(gfx.getPixel(5, 3)).toBe(9);
+        expect(gfx.getPixel(6, 3)).toBe(9);
+        expect(gfx.getPixel(4, 3)).toBe(0);
+        expect(gfx.getPixel(7, 3)).toBe(0);
+
+        gfx.now.clear(0);
+        gfx.now.fillCircle(40.5, 40.5, 10.4, 6);
+        expect(gfx.getPixel(41, 41)).toBe(6);
+    });
+
     it("skips colour 0 when drawing an image, unless told not to", () => {
         const { gfx } = createBios();
         gfx.now.clear(3);

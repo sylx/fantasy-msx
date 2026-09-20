@@ -164,6 +164,11 @@ screen.frame();
 Sprite colours may be given per line, which is a V9938 feature with no
 equivalent on an MSX1: one sprite, shaded, instead of two stacked.
 
+Coordinates are whole pixels. Anything else is rounded to the nearest one on
+the way in, so positions worked out with `sin` and `cos` can be passed straight
+through - a fraction reaching the packing would otherwise pick its shift from
+the fractional part and corrupt the pixel sharing the byte.
+
 ## Loading a picture
 
 A V9938 has no idea what a PNG is. What it has is a framebuffer of indices -

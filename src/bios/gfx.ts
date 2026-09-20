@@ -14,6 +14,9 @@ import { CHAR_HEIGHT, CHAR_WIDTH, FONT, glyphOffset } from "./font.js";
 import type { BlitOptions, Raster, Rect } from "./raster.js";
 import type { Screen } from "./screen.js";
 
+/** As in the rasteriser: whole pixels in, so a job cannot be queued between two. */
+const px = Math.round;
+
 export class Graphics {
     /** Null means "the whole screen", which follows the mode when it changes. */
     private clipRect: Rect | null = null;
@@ -74,6 +77,7 @@ export class Graphics {
      * queued, so changing it later does not disturb work already in flight.
      */
     setClip(x: number, y: number, width: number, height: number): void {
+        x = px(x); y = px(y); width = px(width); height = px(height);
         const x0 = Math.max(0, x);
         const y0 = Math.max(0, y);
         this.clipRect = {
@@ -102,6 +106,7 @@ export class Graphics {
     }
 
     pixel(x: number, y: number, color: number): void {
+        x = px(x); y = px(y);
         this.blitter.push(new PointsJob(this.pageBase(), this.capture(), Int32Array.of(x, y), color));
     }
 
@@ -111,11 +116,11 @@ export class Graphics {
     }
 
     hline(x: number, y: number, width: number, color: number): void {
-        this.fillRect(x, y, width, 1, color);
+        this.fillRect(px(x), px(y), px(width), 1, color);
     }
 
     vline(x: number, y: number, height: number, color: number): void {
-        this.fillRect(x, y, 1, height, color);
+        this.fillRect(px(x), px(y), 1, px(height), color);
     }
 
     /**
@@ -123,10 +128,12 @@ export class Graphics {
      * which is eight times faster - worth arranging when you can.
      */
     fillRect(x: number, y: number, width: number, height: number, color: number): void {
+        x = px(x); y = px(y); width = px(width); height = px(height);
         this.blitter.push(new FillJob(this.pageBase(), this.capture(), x, y, width, height, color, this.pack));
     }
 
     rect(x: number, y: number, width: number, height: number, color: number): void {
+        x = px(x); y = px(y); width = px(width); height = px(height);
         if (width <= 0 || height <= 0) return;
         this.fillRect(x, y, width, 1, color);
         this.fillRect(x, y + height - 1, width, 1, color);
@@ -135,10 +142,12 @@ export class Graphics {
     }
 
     line(x0: number, y0: number, x1: number, y1: number, color: number): void {
+        x0 = px(x0); y0 = px(y0); x1 = px(x1); y1 = px(y1);
         this.blitter.push(new LineJob(this.pageBase(), this.capture(), x0, y0, x1, y1, color));
     }
 
     circle(cx: number, cy: number, radius: number, color: number): void {
+        cx = px(cx); cy = px(cy); radius = px(radius);
         const points: number[] = [];
         walkCircle(radius, (dx, dy) => {
             points.push(cx + dx, cy + dy, cx - dx, cy + dy, cx + dx, cy - dy, cx - dx, cy - dy);
@@ -147,6 +156,7 @@ export class Graphics {
     }
 
     fillCircle(cx: number, cy: number, radius: number, color: number): void {
+        cx = px(cx); cy = px(cy); radius = px(radius);
         // The midpoint walk reports offsets by octant, which would make the
         // circle arrive in scattered bands. Collect the spans and queue them
         // top to bottom so it fills the way a scanline fill looks.
@@ -170,6 +180,7 @@ export class Graphics {
      * has moved.
      */
     blit(sx: number, sy: number, dx: number, dy: number, width: number, height: number, options: BlitOptions = {}): void {
+        sx = px(sx); sy = px(sy); dx = px(dx); dy = px(dy); width = px(width); height = px(height);
         const source = this.screen.pageBase(options.fromPage ?? this.screen.drawPage);
         this.blitter.push(new CopyJob(
             this.pageBase(), this.capture(), source, sx, sy, dx, dy, width, height, !!options.transparent, this.pack
@@ -178,6 +189,7 @@ export class Graphics {
 
     /** Draws an image given one byte per pixel - the format to author art in. */
     drawImage(x: number, y: number, width: number, height: number, pixels: ArrayLike<number>, transparent = true): void {
+        x = px(x); y = px(y); width = px(width); height = px(height);
         this.blitter.push(new TransferJob(this.pageBase(), this.capture(), x, y, width, height, pixels, transparent));
     }
 
@@ -186,6 +198,7 @@ export class Graphics {
      * and pushed to VRAM by the blitter, so a long line arrives left to right.
      */
     text(x: number, y: number, text: string, color = 15, background?: number): void {
+        x = px(x); y = px(y);
         const base = this.pageBase();
         const clip = this.capture();
         let line = 0;

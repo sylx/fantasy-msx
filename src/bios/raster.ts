@@ -30,6 +30,15 @@ export interface BlitOptions {
     fromPage?: number;
 }
 
+/**
+ * Coordinates are whole pixels, so anything else is rounded to the nearest one
+ * on the way in. Callers work out positions with sin and cos, and a fraction
+ * that slips through lands between pixels: the byte packing picks a shift from
+ * the fractional part and corrupts the pixel next door, and `line` steps by one
+ * towards a target it can never equal, so it never returns.
+ */
+const px = Math.round;
+
 export class Raster {
     private readonly vram: Uint8Array;
     private clipRect: Rect;
@@ -77,18 +86,21 @@ export class Raster {
     }
 
     pixel(x: number, y: number, color: number): void {
+        x = px(x); y = px(y);
         const c = this.clipRect;
         if (x < c.x || y < c.y || x >= c.x + c.width || y >= c.y + c.height) return;
         this.writePixel(this.base + y * this.stride + ((x / this.pack) | 0), x, color);
     }
 
     getPixel(x: number, y: number, page = this.screen.drawPage): number {
+        x = px(x); y = px(y);
         if (x < 0 || y < 0 || x >= this.screen.width || y >= this.screen.height) return 0;
         return this.readPixel(this.screen.pageBase(page) + y * this.stride, x);
     }
 
     /** Horizontal run. Whole bytes are filled at once; the ends go pixel by pixel. */
     hline(x: number, y: number, width: number, color: number): void {
+        x = px(x); y = px(y); width = px(width);
         const c = this.clipRect;
         if (y < c.y || y >= c.y + c.height) return;
 
@@ -115,6 +127,7 @@ export class Raster {
     }
 
     vline(x: number, y: number, height: number, color: number): void {
+        x = px(x); y = px(y); height = px(height);
         const c = this.clipRect;
         if (x < c.x || x >= c.x + c.width) return;
 
@@ -125,11 +138,13 @@ export class Raster {
     }
 
     fillRect(x: number, y: number, width: number, height: number, color: number): void {
+        x = px(x); y = px(y); width = px(width); height = px(height);
         for (let i = 0; i < height; ++i) this.hline(x, y + i, width, color);
     }
 
     /** Outline only, one pixel thick, drawn inside the given rectangle. */
     rect(x: number, y: number, width: number, height: number, color: number): void {
+        x = px(x); y = px(y); width = px(width); height = px(height);
         if (width <= 0 || height <= 0) return;
         this.hline(x, y, width, color);
         this.hline(x, y + height - 1, width, color);
@@ -138,6 +153,7 @@ export class Raster {
     }
 
     line(x0: number, y0: number, x1: number, y1: number, color: number): void {
+        x0 = px(x0); y0 = px(y0); x1 = px(x1); y1 = px(y1);
         // Horizontal and vertical runs are common enough to be worth the shortcut.
         if (y0 === y1) return this.hline(Math.min(x0, x1), y0, Math.abs(x1 - x0) + 1, color);
         if (x0 === x1) return this.vline(x0, Math.min(y0, y1), Math.abs(y1 - y0) + 1, color);
@@ -158,6 +174,7 @@ export class Raster {
     }
 
     circle(cx: number, cy: number, radius: number, color: number): void {
+        cx = px(cx); cy = px(cy); radius = px(radius);
         this.walkCircle(radius, (dx, dy) => {
             this.pixel(cx + dx, cy + dy, color);
             this.pixel(cx - dx, cy + dy, color);
@@ -167,6 +184,7 @@ export class Raster {
     }
 
     fillCircle(cx: number, cy: number, radius: number, color: number): void {
+        cx = px(cx); cy = px(cy); radius = px(radius);
         let lastY = -1;
         this.walkCircle(radius, (dx, dy) => {
             if (dy === lastY) return;                       // one span per scanline
@@ -184,6 +202,7 @@ export class Raster {
      * how a background gets restored under a moving object.
      */
     blit(sx: number, sy: number, dx: number, dy: number, width: number, height: number, options: BlitOptions = {}): void {
+        sx = px(sx); sy = px(sy); dx = px(dx); dy = px(dy); width = px(width); height = px(height);
         const from = this.screen.pageBase(options.fromPage ?? this.screen.drawPage);
         const transparent = !!options.transparent;
         const downwards = dy > sy;                          // walk away from the overlap
@@ -200,6 +219,7 @@ export class Raster {
      * blitter works in, which is why it is a run rather than a rectangle.
      */
     copyRun(sourceBase: number, sx: number, sy: number, dx: number, dy: number, width: number, transparent: boolean): void {
+        sx = px(sx); sy = px(sy); dx = px(dx); dy = px(dy); width = px(width);
         if (width <= 0) return;
         const source = sourceBase + sy * this.stride;
 
@@ -224,6 +244,7 @@ export class Raster {
      * sprites and tiles in - readable, and unpacked at draw time.
      */
     drawImage(x: number, y: number, width: number, height: number, pixels: ArrayLike<number>, transparent = true): void {
+        x = px(x); y = px(y); width = px(width); height = px(height);
         for (let row = 0; row < height; ++row) {
             for (let column = 0; column < width; ++column) {
                 const color = pixels[row * width + column] & this.colorMask;
@@ -240,6 +261,7 @@ export class Raster {
      * cell behind each character; leaving it out draws the glyphs only.
      */
     text(x: number, y: number, text: string, color = 15, background?: number): void {
+        x = px(x); y = px(y);
         let cursorX = x;
         let cursorY = y;
 
@@ -302,7 +324,7 @@ export class Raster {
 
     /** Midpoint circle, reporting one octant's worth of offsets mirrored eight ways. */
     private walkCircle(radius: number, plot: (dx: number, dy: number) => void): void {
-        let x = radius;
+        let x = px(radius);
         let y = 0;
         let error = 1 - radius;
         while (x >= y) {
