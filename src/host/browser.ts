@@ -125,10 +125,18 @@ export class BrowserHost implements Host {
         }
 
         const keyboard = runtime.keyboard;
+        // Keys whose press was swallowed, so their repeats can be too.
+        const swallowed = new Set<string>();
         const onKey = (event: KeyboardEvent, down: boolean) => {
             // The browser's own repeats are dropped: the runtime makes its own,
-            // so a headless run and this one see the same keystrokes.
-            if (event.repeat) return;
+            // so a headless run and this one see the same keystrokes. They are
+            // still swallowed like the press was, or a held arrow key scrolls
+            // the page - and inside an iframe that cannot scroll, the page
+            // around it.
+            if (event.repeat) {
+                if (swallowed.has(event.code)) event.preventDefault();
+                return;
+            }
             // Browsers keep audio suspended until the user does something.
             if (down) void this.audio?.resume();
 
@@ -139,11 +147,15 @@ export class BrowserHost implements Host {
             // survive - the joystick's, and while text is being typed the keys
             // the page would otherwise scroll or navigate with.
             const bound = input.setKey(event.code, down);
-            if (bound || keyboard.claims(event)) event.preventDefault();
+            const swallow = bound || keyboard.claims(event);
+            if (swallow) event.preventDefault();
+            if (down && swallow) swallowed.add(event.code);
+            else swallowed.delete(event.code);
         };
         const keyDown = (event: KeyboardEvent) => onKey(event, true);
         const keyUp = (event: KeyboardEvent) => onKey(event, false);
         const blur = () => {
+            swallowed.clear();
             input.releaseAll();
             keyboard.releaseAll();
             runtime.pointer.releaseAll();

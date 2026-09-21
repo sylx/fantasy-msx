@@ -284,3 +284,59 @@ describe("the mouse", () => {
         expect(runtime.pointer.present).toBe(false);
     });
 });
+
+describe("the keyboard", () => {
+    let canvas: ReturnType<typeof element>;
+    let window: ReturnType<typeof element>;
+    let saved: unknown;
+
+    beforeEach(() => {
+        canvas = element();
+        window = element();
+        saved = globalThis.window;
+        Object.assign(globalThis, { window, requestAnimationFrame: () => 0, cancelAnimationFrame: () => {} });
+    });
+
+    afterEach(() => {
+        Object.assign(globalThis, { window: saved });
+        vi.restoreAllMocks();
+    });
+
+    function key(code: string, repeat = false) {
+        return { code, key: code, repeat, ctrlKey: false, altKey: false, metaKey: false, shiftKey: false, preventDefault: vi.fn() };
+    }
+
+    function started() {
+        const host = new BrowserHost({ canvas: canvas as never, audio: false, gamepads: false });
+        const runtime = boot({ host });
+        runtime.run({ update: () => {} });
+        return { host, runtime };
+    }
+
+    it("swallows the repeats of a held joystick key, so the page does not scroll", () => {
+        started();
+        const press = key("ArrowDown");
+        window.fire("keydown", press);
+        expect(press.preventDefault).toHaveBeenCalled();
+        const again = key("ArrowDown", true);
+        window.fire("keydown", again);
+        expect(again.preventDefault).toHaveBeenCalled();
+    });
+
+    it("stops swallowing the repeats once the key is let go", () => {
+        started();
+        window.fire("keydown", key("ArrowDown"));
+        window.fire("keyup", key("ArrowDown"));
+        const stray = key("ArrowDown", true);
+        window.fire("keydown", stray);
+        expect(stray.preventDefault).not.toHaveBeenCalled();
+    });
+
+    it("leaves the repeats of an unclaimed key to the browser", () => {
+        started();
+        window.fire("keydown", key("F5"));
+        const again = key("F5", true);
+        window.fire("keydown", again);
+        expect(again.preventDefault).not.toHaveBeenCalled();
+    });
+});
