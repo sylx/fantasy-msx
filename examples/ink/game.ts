@@ -4,12 +4,14 @@
 // The blitter is slow, so paint arrives over several frames and you have to lay
 // it where a drifter is going rather than where it is. Sprites cost nothing, so
 // everything that moves is one - including the shots, which are thrown in the
-// direction you are flying and burst into paint where they land.
+// direction you are flying and burst into paint where they land. Ink comes
+// back slowly, and a shot bursts bigger the fuller the tank it was fired from,
+// so it pays to wait for the shot that matters.
 //
 // Arrows or WASD to fly, Z to shoot, X to start.
 
 import {
-    BUTTON, compile, opllVoice, psgVoice, rhythmVoice, type App, type Context
+    BUTTON, compile, opllVoice, psgVoice, rhythmVoice, type App, type Context, type MulticolorPattern
 } from "../../src/index.js";
 
 // --- The machine's fixed bits ------------------------------------------------
@@ -17,11 +19,15 @@ import {
 const WIDTH = 256;
 const HEIGHT = 212;
 const BAR = 10;                     // status bar along the top
-const PLAYER_SPRITE = 0;
-const PLAYER_PATTERN = 0;
-const DRIFTER_PATTERN = 4;          // 16x16 patterns come in fours
-const BULLET_PATTERN = 8;
-const MAX_DRIFTERS = 6;             // eight sprites to a scanline, and the player and a shot want two
+const PLAYER_SPRITE = 0;           // and 1: the ship is a multicolour pair
+// 16x16 patterns come in fours, and a multicolour one takes two of them.
+const PLAYER_PATTERNS = [0, 8];     // exhaust long, exhaust short
+const DRIFTER_PATTERNS = [16, 24, 32];  // looking left, ahead, right
+const BULLET_PATTERN = 40;
+// Two sprites each now, so a few side by side use up the eight a scanline
+// allows. The order is turned every frame, so the one left over flickers
+// rather than vanishes - what MSX games have always done about it.
+const MAX_DRIFTERS = 6;
 const MAX_BULLETS = 3;
 
 /** Palette entries at or above this count as painted. */
@@ -37,23 +43,61 @@ const INK_RAMP = [8, 9, 10, 11, 12];
 /** The pale blue everything that is not ink is drawn in. */
 const COOL = 13;
 
+/** Frames a new wave spends blinking in, harmless, so none can appear on top of you. */
+const SPAWN_GRACE = 90;
+
 const BULLET_SPEED = 4;
 const BULLET_RANGE = 92;            // pixels a shot carries before it bursts on its own
-const SPLAT_RADIUS = 26;
+/** Splat radius from an empty tank and from a full one. */
+const SPLAT_MIN = 10;
+const SPLAT_MAX = 30;
 
-const PLAYER_ART = [
-    ".......##.......", "......####......", "......####......", ".....######.....",
-    ".....######.....", "....########....", "....##.##.##....", "...####..####...",
-    "...###....###...", "..####....####..", "..###......###..", ".####......####.",
-    ".##..........##.", "###..........###", "##............##", "................"
+/** The ink tank. A shot costs a fixed amount and cannot be fired without it. */
+const INK_MAX = 100;
+const SHOT_COST = 20;
+const INK_REFILL = 0.12;            // a tank's worth in about fourteen seconds
+
+// Two sprites ORed together give three colours a line - A, B and A|B - so each
+// band of rows below is drawn from one trio whose third colour is the OR of
+// the other two. The trios are picked from the palette `init` sets up.
+
+/**
+ * The ship: navy 2, pale blue 13 and white 15 (2|13) down the hull; the wings
+ * swap to violet 6 and red 9 (6|9 = 15 again) for their running lights; the
+ * nozzles and exhaust are indigo 4 and yellow 11 (4|11 = 15). The hull stays
+ * cool so the ship reads on top of its own ink.
+ */
+const SHIP_PALETTE = { o: 2, "#": COOL, "*": 15, w: 6, r: 9, n: 4, y: 11, a: 10 };
+
+const SHIP_BODY = [
+    ".......**.......", "......o**o......", "......#**#......", ".....o#oo#o.....",
+    ".....#o*oo#.....", ".....#oooo#.....", "....o##oo##o....", "...o###**###o...",
+    "..ww*w****w*ww..", ".www*ww**ww*www.", "rwww*wwwwww*wwwr", "rww.*ww**ww*.wwr",
+    "....nnn..nnn....", "....n*n..n*n...."
 ];
 
-const DRIFTER_ART = [
-    "................", "...##########...", "..############..", ".####..##..####.",
-    "###....##....###", "##.....##.....##", "##..##########..", "##..##......##..",
-    "##..##......##..", "##..##########..", "##.....##.....##", "###....##....###",
-    ".####..##..####.", "..############..", "...##########...", "................"
+/** The exhaust, flickered between two lengths. */
+const SHIP_ART = [
+    [...SHIP_BODY, "....y*y..y*y....", ".....a....a....."],
+    [...SHIP_BODY, ".....y....y.....", "................"]
 ];
+
+/**
+ * A drifter is an eye in a shell: indigo 3, 4 and 7 (3|4) for the shell, and
+ * violet 6, red 9 and white 15 across the eye. The iris follows the ship.
+ */
+const DRIFTER_PALETTE = { s: 3, m: 4, h: 7, w: 6, r: 9, "*": 15 };
+
+function drifterArt(iris: string): string[] {
+    return [
+        "................", ".......hh.......", ".......mm.......", ".....sshhss.....",
+        "....shhhhhhs....", "...shhmmmmhhs...", "...ww******ww...", `.wwww${iris}wwww.`,
+        `.wwww${iris}wwww.`, "...ww******ww...", "...smmmmmmmms...", "....smmmmmms....",
+        ".....ssmmss.....", ".......mm.......", ".......ss.......", "................"
+    ];
+}
+
+const DRIFTER_ART = [drifterArt("rr****"), drifterArt("**rr**"), drifterArt("****rr")];
 
 const BULLET_ART = [
     "................", "................", "................", "................",
@@ -98,6 +142,8 @@ interface Drifter {
     dx: number;
     dy: number;
     alive: boolean;
+    /** Frames left before it can hurt the ship. It blinks until then. */
+    grace: number;
 }
 
 /** A shot in flight. `x` and `y` are its centre; `life` is frames left to run. */
@@ -107,6 +153,8 @@ interface Bullet {
     dx: number;
     dy: number;
     life: number;
+    /** How big it bursts, fixed by the ink in the tank when it was fired. */
+    radius: number;
 }
 
 const state = {
@@ -120,6 +168,7 @@ const state = {
     score: 0,
     wave: 1,
     cooldown: 0,
+    ink: INK_MAX,
     timer: 0,
     drifters: [] as Drifter[],
     bullets: [] as Bullet[]
@@ -135,6 +184,10 @@ function makeRandom(seed: number): () => number {
 }
 let random = makeRandom(0x5a17);
 
+/** Filled in by `init`, which is the first time there are sprites to load them into. */
+let shipPatterns: MulticolorPattern[] = [];
+let drifterPatterns: MulticolorPattern[] = [];
+
 function spawnWave(wave: number): Drifter[] {
     const count = Math.min(MAX_DRIFTERS, 2 + wave);
     const speed = 0.6 + wave * 0.15;
@@ -145,7 +198,8 @@ function spawnWave(wave: number): Drifter[] {
             y: BAR + 16 + random() * (HEIGHT - BAR - 48),
             dx: Math.cos(angle) * speed,
             dy: Math.sin(angle) * speed,
-            alive: true
+            alive: true,
+            grace: SPAWN_GRACE
         };
     });
 }
@@ -180,12 +234,15 @@ function statusBar(gfx: Context["gfx"]): void {
 
     for (let i = 0; i < state.lives; ++i) gfx.now.fillRect(80 + i * 8, 3, 5, 5, 9);
 
-    // What the blitter still owes, which is also how long until you can shoot.
-    const owed = Math.min(1, gfx.work / 30000);
-    gfx.now.text(150, 1, "INK", owed > 0.7 ? 9 : 6);
+    // The tank: red when there is not enough in it for a shot. The notch marks
+    // how much a shot takes.
+    const dry = state.ink < SHOT_COST;
+    gfx.now.text(150, 1, "INK", dry ? 9 : 6);
     gfx.now.rect(172, 2, 82, 6, 6);
-    const filled = Math.round((1 - owed) * 80);
-    if (filled > 0) gfx.now.fillRect(173, 3, filled, 4, owed > 0.7 ? 9 : 12);
+    const filled = Math.floor((state.ink / INK_MAX) * 80);
+    gfx.now.fillRect(173, 3, 80, 4, 1);
+    if (filled > 0) gfx.now.fillRect(173, 3, filled, 4, dry ? 9 : 12);
+    gfx.now.fillRect(173 + (SHOT_COST * 80) / INK_MAX, 3, 1, 4, 6);
 }
 
 function centred(gfx: Context["gfx"], y: number, text: string, color: number): void {
@@ -203,6 +260,7 @@ function startGame(ctx: Context): void {
     state.x = 120;
     state.y = 150;
     state.cooldown = 0;
+    state.ink = INK_MAX;
     state.aimX = 0;
     state.aimY = -1;
     state.drifters = spawnWave(1);
@@ -237,8 +295,10 @@ function fire(ctx: Context): void {
         y: state.y + 8 + dy * 2,
         dx,
         dy,
-        life: Math.round(BULLET_RANGE / BULLET_SPEED)
+        life: Math.round(BULLET_RANGE / BULLET_SPEED),
+        radius: Math.round(SPLAT_MIN + (SPLAT_MAX - SPLAT_MIN) * (state.ink / INK_MAX))
     });
+    state.ink -= SHOT_COST;
     ctx.bgm.effect(psgVoice(2), SHOT);
     state.cooldown = 10;
 }
@@ -247,7 +307,7 @@ function fire(ctx: Context): void {
 function land(ctx: Context, bullet: Bullet): void {
     const x = Math.max(2, Math.min(WIDTH - 3, Math.round(bullet.x)));
     const y = Math.max(BAR + 2, Math.min(HEIGHT - 3, Math.round(bullet.y)));
-    splat(ctx.gfx, x, y, SPLAT_RADIUS);
+    splat(ctx.gfx, x, y, bullet.radius);
     ctx.bgm.effect(psgVoice(2), BURST);
 }
 
@@ -278,10 +338,12 @@ function updatePlaying(ctx: Context): void {
     if (dx !== 0 || dy !== 0) { state.aimX = dx; state.aimY = dy; }
 
     if (state.cooldown > 0) --state.cooldown;
+    state.ink = Math.min(INK_MAX, state.ink + INK_REFILL);
 
-    // The queue never drops work, so the game has to hold off itself. That
-    // waiting is the reload.
-    if (input.btn(BUTTON.A) && state.cooldown === 0 && state.bullets.length < MAX_BULLETS && gfx.work < 24000) {
+    // The tank is the reload. The queue never drops work either, so the game
+    // still holds off while the blitter is far behind.
+    const loaded = state.ink >= SHOT_COST;
+    if (input.btn(BUTTON.A) && loaded && state.cooldown === 0 && state.bullets.length < MAX_BULLETS && gfx.work < 24000) {
         fire(ctx);
     }
 
@@ -307,6 +369,10 @@ function updatePlaying(ctx: Context): void {
         // Otherwise it scrubs the ground it stands on.
         gfx.now.fillRect(Math.round(drifter.x) + 4, Math.round(drifter.y) + 4, 8, 8, 1);
 
+        if (drifter.grace > 0) {
+            --drifter.grace;
+            continue;
+        }
         const near = Math.abs(drifter.x - state.x) < 12 && Math.abs(drifter.y - state.y) < 12;
         if (near) {
             loseLife(ctx);
@@ -353,16 +419,11 @@ export const game: App = {
         paintField(gfx);
 
         sprites.setSize(16);
-        sprites.setPatternFromBitmap(PLAYER_PATTERN, PLAYER_ART);
-        sprites.setPatternFromBitmap(DRIFTER_PATTERN, DRIFTER_ART);
+        shipPatterns = SHIP_ART.map((art, i) => sprites.setMulticolorPattern(PLAYER_PATTERNS[i], art, SHIP_PALETTE));
+        drifterPatterns = DRIFTER_ART.map((art, i) => sprites.setMulticolorPattern(DRIFTER_PATTERNS[i], art, DRIFTER_PALETTE));
         sprites.setPatternFromBitmap(BULLET_PATTERN, BULLET_ART);
-        sprites.set(PLAYER_SPRITE, {
-            x: state.x, y: state.y, pattern: PLAYER_PATTERN,
-            // Cool all the way down, now that the warm end of the palette is
-            // ink: the ship has to stay legible on top of its own splats.
-            color: [15, 15, 15, 14, 14, 14, COOL, COOL, COOL, 7, 7, 7, 6, 6, 5, 4]
-        });
-        sprites.setActiveCount(1);
+        sprites.setMulticolor(PLAYER_SPRITE, { x: state.x, y: state.y, pattern: shipPatterns[0] });
+        sprites.setActiveCount(2);
     },
 
     update(ctx: Context) {
@@ -396,24 +457,35 @@ export const game: App = {
 
         // Sprites are free, so every actor is one and they are placed every
         // frame whatever the phase.
-        sprites.move(PLAYER_SPRITE, state.x, state.phase === "dying" ? 240 : state.y);
-        let slot = 1;
-        for (const drifter of state.drifters) {
-            if (!drifter.alive || slot > MAX_DRIFTERS) continue;
-            sprites.set(slot, {
-                x: Math.round(drifter.x), y: Math.round(drifter.y), pattern: DRIFTER_PATTERN,
-                color: [COOL, COOL, COOL, 7, 7, 7, 5, 5, 5, 5, 7, 7, 7, COOL, COOL, COOL]
-            });
-            ++slot;
-        }
-        // Shots last, and shaded down the ink ramp so a shot in flight reads as
-        // the paint it is about to become.
+        sprites.setMulticolor(PLAYER_SPRITE, {
+            x: state.x, y: state.phase === "dying" ? 240 : state.y,
+            pattern: shipPatterns[(ctx.frame >> 2) & 1]
+        });
+        let slot = 2;
+        // Shots next, so they are never the ones a crowded line drops, and
+        // shaded down the ink ramp so a shot in flight reads as the paint it is
+        // about to become.
         for (const bullet of state.bullets) {
             sprites.set(slot, {
                 x: Math.round(bullet.x) - 8, y: Math.round(bullet.y) - 8, pattern: BULLET_PATTERN,
                 color: BULLET_SHADING
             });
             ++slot;
+        }
+        // Drifters last, starting from a different one each frame. One still
+        // arriving is shown on alternate stretches of four frames.
+        const blink = ((ctx.frame >> 2) & 1) === 0;
+        const alive = state.drifters
+            .filter((drifter) => drifter.alive && (drifter.grace === 0 || blink))
+            .slice(0, MAX_DRIFTERS);
+        for (let i = 0; i < alive.length; ++i) {
+            const drifter = alive[(i + ctx.frame) % alive.length];
+            const look = state.x - drifter.x;
+            sprites.setMulticolor(slot, {
+                x: Math.round(drifter.x), y: Math.round(drifter.y),
+                pattern: drifterPatterns[look < -24 ? 0 : look > 24 ? 2 : 1]
+            });
+            slot += 2;
         }
         sprites.setActiveCount(slot);
     },

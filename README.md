@@ -980,11 +980,19 @@ pale yellow core. Painted ground kills the drifters, but a splat arrives over
 several frames, so you shoot at where a drifter is *going* and it has to be in
 flight before that. The drifters scrub the ground they cross. The framebuffer is
 not a picture of the game - it *is* the game state, read back with
-`gfx.getPixel`. The ink gauge in the status bar is `gfx.work`: the blitter's
-backlog, doubling as your reload, and a gradient splat costs it a little over
-twice a flat one.
+`gfx.getPixel`. The ink gauge in the status bar is your tank. A shot takes a
+fifth of it and cannot be fired from less, the tank refills over about fourteen
+seconds, and a shot bursts bigger the fuller the tank it left - so a volley
+sprays small splats and a patient shot lands one wide enough to catch a
+drifter that changes course. A new wave blinks in for a second and a half
+before it can touch you.
 
 Every actor is a hardware sprite, shots included, so none of them cost anything.
+The ship and the drifters are multicolour pairs - three colours a line from two
+sprites and the CC bit - with an exhaust that flickers and an eye that follows
+you. Pairs fill the eight a scanline allows quickly, so the drifters are placed
+in a different order each frame and a crowded line flickers instead of losing
+the same one for good.
 The music is MML on the PSG and OPLL, and firing borrows a PSG channel for the
 shot and its burst.
 
