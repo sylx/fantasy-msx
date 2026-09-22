@@ -194,13 +194,45 @@ registerProcessor("fantasy-msx-sink", FantasyMsxSink);
 /** Frames of audio allowed to pile up before the worklet starts dropping. */
 const MAX_QUEUED_FRAMES = 4;
 
+/** Seconds a change of the listener's volume takes to settle, so it does not click. */
+const VOLUME_RAMP = 0.02;
+
 export class WebAudioOutput {
     private context: AudioContext | null = null;
     private node: AudioWorkletNode | null = null;
+    private gain: GainNode | null = null;
     private mixer: AudioMixer | null = null;
     private buffer = new Float32Array(0);
+    private level = 1;
+    private silenced = false;
 
     constructor(private readonly machine: FantasyMachine) {}
+
+    /**
+     * The listener's volume on top of whatever the program itself plays at.
+     * 1 leaves it as it is, and above 1 amplifies it: the chips are mixed
+     * with a lot of headroom, so there is room to, though too much clips.
+     * Not `AudioMixer.volume`: that one is the program's to set, and this
+     * one is the person's, so neither overrides the other.
+     */
+    get volume(): number {
+        return this.level;
+    }
+
+    set volume(value: number) {
+        this.level = Math.max(0, Number.isFinite(value) ? value : 1);
+        this.applyGain();
+    }
+
+    /** Silences the output without forgetting the volume. */
+    get muted(): boolean {
+        return this.silenced;
+    }
+
+    set muted(value: boolean) {
+        this.silenced = value;
+        this.applyGain();
+    }
 
     get sampleRate(): number {
         return this.context?.sampleRate ?? 0;
@@ -238,7 +270,17 @@ export class WebAudioOutput {
             outputChannelCount: [2],
             processorOptions: { maxQueued: perFrame * MAX_QUEUED_FRAMES }
         });
-        this.node.connect(context.destination);
+        // The volume goes after the worklet, where the chips' own mix is
+        // already done, so turning it down loses nothing a program set.
+        this.gain = context.createGain();
+        this.gain.gain.value = this.silenced ? 0 : this.level;
+        this.node.connect(this.gain);
+        this.gain.connect(context.destination);
+    }
+
+    private applyGain(): void {
+        if (!this.gain || !this.context) return;
+        this.gain.gain.setTargetAtTime(this.silenced ? 0 : this.level, this.context.currentTime, VOLUME_RAMP);
     }
 
     /** Renders one frame of audio and hands it to the worklet. */
@@ -262,6 +304,8 @@ export class WebAudioOutput {
     async stop(): Promise<void> {
         this.node?.disconnect();
         this.node = null;
+        this.gain?.disconnect();
+        this.gain = null;
         this.mixer = null;
         await this.context?.close();
         this.context = null;

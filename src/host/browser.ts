@@ -23,6 +23,10 @@ export interface BrowserHostOptions {
     gamepads?: boolean;
     /** Open the sound device. On by default. */
     audio?: boolean;
+    /** The listener's volume to start at. 1, the default, leaves the sound as it is. */
+    volume?: number;
+    /** Start silenced. Off by default. */
+    muted?: boolean;
     /** Accept files dropped on the screen. On by default. */
     drop?: boolean;
     /** Report the mouse. On by default. */
@@ -85,6 +89,8 @@ export class BrowserHost implements Host {
     private readonly options: BrowserHostOptions;
     private input: Input | null = null;
     private audio: WebAudioOutput | null = null;
+    private level: number;
+    private silenced: boolean;
     private runtime: Runtime | null = null;
     /** Null until a frame has been shown and there is somewhere to point at. */
     /** Where a 512-wide mode is squashed, when the canvas has no whole number to give. */
@@ -98,6 +104,8 @@ export class BrowserHost implements Host {
     constructor(options: BrowserHostOptions) {
         this.options = options;
         this.canvas = options.canvas;
+        this.level = options.volume ?? 1;
+        this.silenced = options.muted ?? false;
 
         if (options.crt) {
             this.crt = CrtDisplay.create(this.canvas, options.crt === true ? {} : options.crt);
@@ -114,6 +122,29 @@ export class BrowserHost implements Host {
         this.context.imageSmoothingEnabled = false;
     }
 
+    /**
+     * The listener's volume, 1 for as it is. Kept here as well as on the output, so
+     * it can be set before the sound device opens and survives it closing.
+     */
+    get volume(): number {
+        return this.level;
+    }
+
+    set volume(value: number) {
+        this.level = Math.max(0, Number.isFinite(value) ? value : 1);
+        if (this.audio) this.audio.volume = this.level;
+    }
+
+    /** Silences the sound without forgetting the volume. */
+    get muted(): boolean {
+        return this.silenced;
+    }
+
+    set muted(value: boolean) {
+        this.silenced = value;
+        if (this.audio) this.audio.muted = value;
+    }
+
     attach(runtime: Runtime): void {
         const input = runtime.input;
         this.input = input;
@@ -121,6 +152,8 @@ export class BrowserHost implements Host {
 
         if (this.options.audio !== false) {
             this.audio = new WebAudioOutput(runtime.bios.system.machine);
+            this.audio.volume = this.level;
+            this.audio.muted = this.silenced;
             void this.audio.start();
         }
 

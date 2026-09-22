@@ -57,13 +57,19 @@ export interface BootOptions {
      * says so, draws the frames itself, and leaves `runtime.crt` null.
      */
     crt?: boolean | CrtOptions;
+    /**
+     * The listener's volume to start at, 1 for as it is, and whether to start
+     * silenced. Both stay live as `runtime.volume` and `runtime.muted`.
+     */
+    volume?: number;
+    muted?: boolean;
 }
 
 /** Brings up a machine and a runtime, without starting the clock. */
 export function boot(options: BootOptions = {}): Runtime {
     const host = options.host
         ?? (options.canvas
-            ? new BrowserHost({ canvas: options.canvas, scale: options.scale, crt: options.crt })
+            ? new BrowserHost({ canvas: options.canvas, scale: options.scale, crt: options.crt, volume: options.volume, muted: options.muted })
             : new HeadlessHost());
 
     const bios = options.bios ?? createBios();

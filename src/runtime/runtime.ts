@@ -109,6 +109,12 @@ export interface Host {
      */
     readonly crt?: Crt | null;
     /**
+     * The listener's volume, 1 for as it is, and whether the sound is silenced. A host
+     * with no sound has neither, and `runtime.volume` is then just 1.
+     */
+    volume?: number;
+    muted?: boolean;
+    /**
      * Called once, with the runtime, so the host can reach the things it needs
      * - input to wire events to, and the machine to pull audio from.
      */
@@ -179,6 +185,29 @@ export class Runtime implements Context {
 
     get crt(): Crt | null {
         return this.host.crt ?? null;
+    }
+
+    /**
+     * The listener's volume, 1 for as it is and above that louder - for a page's own volume control, not
+     * the program's. A program that wants to be quieter writes
+     * `AudioMixer.volume` or its chips' registers; this one belongs to the
+     * person listening and sits on top of both.
+     */
+    get volume(): number {
+        return this.host.volume ?? 1;
+    }
+
+    set volume(value: number) {
+        if ("volume" in this.host) this.host.volume = value;
+    }
+
+    /** Silences the sound without forgetting the volume. */
+    get muted(): boolean {
+        return this.host.muted ?? false;
+    }
+
+    set muted(value: boolean) {
+        if ("muted" in this.host) this.host.muted = value;
     }
 
     get frame(): number {

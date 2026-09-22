@@ -65,6 +65,26 @@ describe("Runtime", () => {
     });
 });
 
+describe("The listener's volume", () => {
+    it("is left at full on a host with no sound", () => {
+        const runtime = boot();
+        runtime.volume = 0.3;
+        runtime.muted = true;
+        expect(runtime.volume).toBe(1);
+        expect(runtime.muted).toBe(false);
+    });
+
+    it("is handed to a host that has one", () => {
+        const host = Object.assign(new HeadlessHost(), { volume: 1, muted: false });
+        const runtime = boot({ host });
+        runtime.volume = 0.3;
+        runtime.muted = true;
+        expect(host.volume).toBe(0.3);
+        expect(host.muted).toBe(true);
+        expect(runtime.volume).toBe(0.3);
+    });
+});
+
 describe("Dropped files", () => {
     function file(name: string, contents = "hello"): DroppedFile {
         return {
