@@ -247,6 +247,11 @@ export class Graphics {
     // --- Internals --------------------------------------------------------
 
     private pageBase(): number {
+        // Without a framebuffer, the page is a name table or nothing at all,
+        // and pixels written there would land among the characters.
+        if (!this.screen.mode.bitmap) {
+            throw new Error(`${this.screen.mode.name} has no framebuffer to draw in - use G4, G5, G6 or G7, or tiles in G1, G2 and G3`);
+        }
         return this.screen.pageBase(this.screen.drawPage);
     }
 

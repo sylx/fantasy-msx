@@ -43,6 +43,7 @@ same position an MSX program's VBlank handler occupies.
 | L1 API | typed register/VRAM/port access | done |
 | L2 BIOS | drawing and sprites | done |
 | L2 BIOS | scroll: R23 down, the V9958's R26/R27 across, bands on the line interrupt | done |
+| L2 BIOS | tiles: SCREEN 1, 2 and 4 - patterns, colours and name tables | done |
 | L2 BIOS | music: MML and a frame-driven driver | done |
 | L2 BIOS | images: a URL in, VRAM out, reduced to the mode | done |
 | L2 BIOS | text: the host's fonts, rasterised outside and carried in | done |
@@ -204,6 +205,59 @@ Coordinates are whole pixels. Anything else is rounded to the nearest one on
 the way in, so positions worked out with `sin` and `cos` can be passed straight
 through - a fraction reaching the packing would otherwise pick its shift from
 the fractional part and corrupt the pixel sharing the byte.
+
+## Characters: SCREEN 1, 2 and 4
+
+The MSX1's screens are not bitmaps. A screen is 32x24 character codes, and what
+a code looks like is eight bytes of pattern you are free to redefine - the PCG.
+Rewriting the whole screen is 768 bytes and costs nothing; redefining a
+pattern changes every cell that uses it at once. `tiles` is that, in the three
+modes that have it:
+
+| Mode | MSX-BASIC | Colour | Sprites |
+|------|-----------|--------|---------|
+| G1 | SCREEN 1 | one pair for each group of eight codes | mode 1: one colour, four to a line |
+| G2 | SCREEN 2 | one pair for every row of every character | mode 1 |
+| G3 | SCREEN 4 | as G2 | mode 2: a colour a line, eight to a line |
+
+```ts
+screen.setMode("G3");                   // or "G1", "G2"
+tiles.loadFont({ foreground: 15 });     // the machine's font into 32-126
+tiles.clear();                          // every cell a space
+tiles.print(2, 1, "SCORE 000100");
+
+tiles.define(128, [                     // hex digits are colours, "." is the backdrop
+    "44444444",
+    "4ffffff4",                          // each row: at most two colours
+    "4f7777f4",
+    // ...
+]);
+tiles.fill(0, 20, 32, 4, 128);
+```
+
+`setPattern` and `setColor` / `setRowColors` write the tables separately;
+`define` works both out from a coloured bitmap and throws on a row with a
+third colour. In G1 the rule is two colours for the whole character, and they
+colour its group of eight - that is the mode, not the API.
+
+G2 and G3 cut the screen into thirds, each with its own 256 patterns and
+colours. Left alone, every definition goes to all of them and a character
+looks the same anywhere; `{ bank: 1 }` writes just the middle third, which is
+how a screen gets more than 256 different characters. There is a fourth bank:
+the name table is 32 rows deep, the 256 lines R23 scrolls round, and the 8
+rows below the screen are drawn from it.
+
+A page in these modes is a name table, so `screen.useDoubleBuffer()` and
+`flip()` swap what is shown whole, and the scroll's bands and `wide` work as
+they do on a bitmap - `wide` pairs two tables into a plane 64 characters
+across, which `put` and `print` address directly. Name tables are written on
+`screen.drawPage`, as `gfx` draws.
+
+`gfx`, `image`, `text` and `console` need a framebuffer and throw here.
+`sprites` works in all three, with what sprite mode 1 leaves in G1 and G2: a
+sprite takes the first of its line colours, and a multicolour pair is refused.
+`sprites.setEnabled(false)` and a band's `sprites: false` do not hide mode 1
+sprites in the emulator, which ignores R8's SPD there.
 
 ## Scrolling
 

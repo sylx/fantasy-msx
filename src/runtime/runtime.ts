@@ -11,7 +11,7 @@
 // the VDP composites every scanline for nothing.
 
 import type { Bios } from "../bios/index.js";
-import type { Console, Graphics, Images, Ime, Screen, Scroll, SoundDriver, Sprites, Typesetter } from "../bios/index.js";
+import type { Console, Graphics, Images, Ime, Screen, Scroll, SoundDriver, Sprites, Tiles, Typesetter } from "../bios/index.js";
 import type { Frame } from "../core/machine.js";
 import type { Crt } from "../host/crt.js";
 import { Input } from "./input.js";
@@ -29,6 +29,11 @@ export interface Context {
     readonly scroll: Scroll;
     readonly gfx: Graphics;
     readonly sprites: Sprites;
+    /**
+     * Characters for SCREEN 1, 2 and 4: patterns, their colours, and the name
+     * table that places them. `screen.setMode("G1")` (or G2, G3) first.
+     */
+    readonly tiles: Tiles;
     /** Loading pictures from URLs, reduced to what the screen mode can show. */
     readonly image: Images;
     /** Text in the host's own fonts, rasterised outside the machine and carried in. */
@@ -161,6 +166,10 @@ export class Runtime implements Context {
 
     get sprites(): Sprites {
         return this.bios.sprites;
+    }
+
+    get tiles(): Tiles {
+        return this.bios.tiles;
     }
 
     get image(): Images {

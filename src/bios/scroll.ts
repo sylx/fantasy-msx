@@ -27,7 +27,7 @@
 // the same way it does the scroll: `split(0, { sprites: false })`.
 
 import { S, S1, type Vdp } from "../api/index.js";
-import type { Screen } from "./screen.js";
+import { isPatternMode, type Screen } from "./screen.js";
 
 /** Lines round the plane, whatever the screen height: R23 is eight bits. */
 export const PLANE_HEIGHT = 256;
@@ -311,9 +311,11 @@ export class Scroll {
             this.ownsSprites = hiding;
         }
 
-        // R2 is left alone unless something asks for a page, since in the
-        // pattern modes it is not a page at all but the name table.
-        if (this.screen.mode.bitmap && (this.twoPages || this.list.some((b) => b.page !== undefined))) {
+        // R2 is left alone unless something asks for a page. In SCREEN 1, 2
+        // and 4 a page is a name table, which flips the same way; in the
+        // other character modes R2 is whatever the program made it.
+        const paged = this.screen.mode.bitmap || isPatternMode(this.screen.mode.name);
+        if (paged && (this.twoPages || this.list.some((b) => b.page !== undefined))) {
             const page = band.page ?? this.screen.displayPage;
             this.vdp.setLayoutAddress(this.screen.pageBase(this.twoPages ? page | 1 : page));
         }

@@ -1,4 +1,4 @@
-// Hardware sprites (V9938 sprite mode 2).
+// Hardware sprites (V9938 sprite mode 2, and mode 1 where the mode has it).
 //
 // This is the part of the VDP that TypeScript cannot undercut: 32 sprites
 // composited by the chip as it scans each line, costing no VRAM writes and no
@@ -14,6 +14,11 @@
 // the per-line colours change all three on every line. `setMulticolorPattern`
 // works the split out from a bitmap drawn in colours.
 //
+// SCREEN 1 and 2 have the MSX1's sprites instead, sprite mode 1: one colour a
+// sprite, kept in the attribute table, and four to a line. The same calls work
+// there with what that leaves - a sprite takes the first of its line colours,
+// and a multicolour pair, which needs CC, is refused.
+//
 // A sprite's Y is a line of the page, not of the screen, so R23 carries the
 // sprites along with the picture. Positions here are screen lines: each Y is
 // written with the vertical scroll of the band it lands in added back, and
@@ -24,8 +29,8 @@ import type { Screen } from "./screen.js";
 
 export const SPRITE_COUNT = 32;
 
-/** Y value that stops the VDP processing any further sprites this frame. */
-const END_OF_LIST = 216;
+/** Y value that stops the VDP processing any further sprites this frame, in sprite mode 2 and 1. */
+const END_OF_LIST = { 2: 216, 1: 208 } as const;
 /** What the attribute table's Y byte of each sprite is standing for. */
 const PLACED = {
     /** Written by someone else - the end of the list, say. Left alone. */
@@ -38,7 +43,7 @@ const PLACED = {
 
 /** Per-line colour byte flags. */
 export const SPRITE_FLAGS = {
-    /** Shifts the sprite 32 pixels left, so it can slide in from off-screen. */
+    /** Shifts the sprite 32 pixels left, so it can slide in from off-screen. The only flag sprite mode 1 has. */
     EARLY_CLOCK: 0x80,
     /** Draws this sprite merged with the higher-priority one above it. */
     COMPOSITE: 0x40,
@@ -256,6 +261,9 @@ export class Sprites {
      * `index` take the overlay with it until `set` puts something else there.
      */
     setMulticolor(index: number, state: MulticolorState): void {
+        if (this.screen.spriteMode === 1) {
+            throw new Error(`${this.vdp.mode.name} has sprite mode 1, which has no CC to merge a multicolour pair with - use G3 or a bitmap mode`);
+        }
         if (index + 1 >= SPRITE_COUNT) throw new Error(`sprite ${index}: a multicolour sprite needs ${index + 1} as well`);
         const flags = (state.flags ?? 0) & ~SPRITE_FLAGS.COMPOSITE;
         const { pattern } = state;
@@ -274,10 +282,15 @@ export class Sprites {
         this.place(index, state.y);
         this.vram[attribute + 1] = state.x & 0xff;
         this.vram[attribute + 2] = this.size === 16 ? state.pattern & 0xfc : state.pattern & 0xff;
-        this.vram[attribute + 3] = 0;
 
         const colors = this.tables.colors + index * 16;
         const flags = state.flags ?? 0;
+        if (this.screen.spriteMode === 1) {
+            const color = typeof state.color === "number" ? state.color : state.color[0] ?? 0;
+            this.vram[attribute + 3] = (color & 0x0f) | (flags & SPRITE_FLAGS.EARLY_CLOCK);
+            return;
+        }
+        this.vram[attribute + 3] = 0;
         if (typeof state.color === "number") {
             this.vram.fill((state.color & 0x0f) | flags, colors, colors + 16);
         } else {
@@ -294,8 +307,12 @@ export class Sprites {
         if (this.paired[index]) this.move(index + 1, x, y);
     }
 
-    /** Replaces the per-line colours of a sprite already placed. */
+    /** Replaces the per-line colours of a sprite already placed. In sprite mode 1, its one colour: the first. */
     setLineColors(index: number, colors: ArrayLike<number>, flags = 0): void {
+        if (this.screen.spriteMode === 1) {
+            this.vram[this.tables.attributes + index * 4 + 3] = ((colors[0] ?? 0) & 0x0f) | (flags & SPRITE_FLAGS.EARLY_CLOCK);
+            return;
+        }
         const base = this.tables.colors + index * 16;
         for (let line = 0; line < 16; ++line) this.vram[base + line] = ((colors[line] ?? 0) & 0x0f) | flags;
     }
@@ -318,7 +335,7 @@ export class Sprites {
     setActiveCount(count: number): void {
         if (count < SPRITE_COUNT) {
             this.placed[count] = PLACED.RAW;
-            this.vram[this.tables.attributes + count * 4] = END_OF_LIST;
+            this.vram[this.tables.attributes + count * 4] = END_OF_LIST[this.screen.spriteMode];
         }
     }
 
@@ -366,10 +383,10 @@ export class Sprites {
             ? this.screen.scroll.spriteBand(this.lines[index], this.height)
             : null;
         let y = band ? this.lines[index] - 1 + band.y : (parking ?? this.parking()) - 1;
-        // 216 ends the list and takes every later sprite with it. One line of
-        // error is the lesser loss.
+        // 216 ends the list and takes every later sprite with it - 208 in
+        // sprite mode 1. One line of error is the lesser loss.
         y &= 0xff;
-        if (y === END_OF_LIST) ++y;
+        if (y === END_OF_LIST[this.screen.spriteMode]) ++y;
         this.vram[this.tables.attributes + index * 4] = y;
     }
 
@@ -388,7 +405,7 @@ export class Sprites {
         return { x: x - 12, y: y - 8 };     // the chip reports raster position, not screen position
     }
 
-    /** True when more than eight sprites landed on one line and one was dropped. */
+    /** True when more than eight sprites landed on one line - four in sprite mode 1 - and one was dropped. */
     overflowed(): boolean {
         return (this.vdp.status(S.INTERRUPT) & S0.FIFTH_SPRITE) !== 0;
     }

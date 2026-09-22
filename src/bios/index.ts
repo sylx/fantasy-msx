@@ -12,6 +12,7 @@ import type { Scroll } from "./scroll.js";
 import { SoundDriver } from "./sound.js";
 import { Sprites } from "./sprites.js";
 import { Typesetter } from "./text.js";
+import { Tiles } from "./tiles.js";
 
 export { VramAtlas, type AtlasOptions, type AtlasStats } from "./atlas.js";
 export { Blitter, COST, type Job } from "./blitter.js";
@@ -32,7 +33,11 @@ export {
     type Coverage, type ResolvedStyle, type TextAlign, type TextBox,
     type TextImage, type TextRasteriser, type TextStyle
 } from "./text.js";
-export { Screen, type SpriteTables } from "./screen.js";
+export { Screen, PATTERN_TABLES, isPatternMode, type PatternModeName, type SpriteTables } from "./screen.js";
+export {
+    Tiles, TILE_COLUMNS, TILE_ROWS, bankOfRow,
+    type DefineOptions, type FontOptions, type TileOptions
+} from "./tiles.js";
 export { Scroll, PLANE_HEIGHT, type BandOptions, type ScrollBand } from "./scroll.js";
 export {
     Sprites, SPRITE_COUNT, SPRITE_FLAGS, splitMulticolor,
@@ -55,6 +60,8 @@ export interface Bios {
     /** Drawing. Queued, and paced by the hardware. */
     readonly gfx: Graphics;
     readonly sprites: Sprites;
+    /** Characters: the name table and PCG of SCREEN 1, 2 and 4. Only usable in those modes. */
+    readonly tiles: Tiles;
     /** Pictures from outside the machine, reduced to what the mode can show. */
     readonly image: Images;
     /** Text in the host's own fonts, rasterised outside the machine and carried in. */
@@ -86,6 +93,7 @@ export function createBios(system: System = createSystem()): Bios {
         scroll: screen.scroll,
         gfx,
         sprites: new Sprites(system.vdp, screen),
+        tiles: new Tiles(system.vdp, screen),
         image: new Images(screen, gfx),
         text: new Typesetter(gfx, screen),
         console: new Console(gfx, screen),
