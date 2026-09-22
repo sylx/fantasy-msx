@@ -1438,6 +1438,34 @@ characters is the whole width of text the chip will show. It has no colours of
 its own either: each frame it asks the palette which entry is currently the
 darkest, lays its bar in that, and writes on it in the brightest.
 
+### CAVE
+
+What the PCG is for. SCREEN 4 has no framebuffer: the screen is 32x24
+character codes, and CAVE throws all 768 of them away every frame and builds
+them again from the cave's description - rock, moss, lava, crystals, the score
+- in a `NameBuffer`, then `transfer`s it whole. There is no dirty tracking, no
+half-built picture, and no blitter: the SCREEN 5 demos wait two frames for a
+clear, and this redraws the world sixty times a second for nothing. It is the
+same trade the MSX1's scrolling shooters made.
+
+The movement is not redrawing, though. The name table is used as a ring 32
+columns round - world column `c` lives in slot `c & 31` - and the V9958's
+R26/R27 slide the display along it a pixel at a time. 33 columns are written
+each frame, so the one arriving on the right lands in the slot that has just
+gone out on the left, under R25's mask. The score is a band of its own at line
+176, held at `x = 0` by the line interrupt.
+
+The lava boils and the crystals glint without the screen being touched. Every
+lava cell is character 131, so rewriting its 8 bytes of pattern and 8 of
+colour moves the whole river; the crystals keep their shape and cycle their
+colour-table rows. Each cave character is drawn with `defineMulticolor`, two
+colours to a row: a lit edge under the ceiling, moss on the floor.
+
+Collision is `tiles.get`: a point of the ship is on rock when the code under it
+on the screen is a rock character. The ship itself is a 16x16 sprite with a
+colour a line - SCREEN 4's sprites are the MSX2's, which is the reason to
+choose it over SCREEN 2.
+
 ```bash
 npm run play -- out.png     # INK, headless, with a scripted controller
 npm run wire -- out.png     # WIRE, four frames of it

@@ -1123,3 +1123,69 @@ describe("the DRIFT demo", () => {
         expect(misplaced()).toBe(0);
     });
 });
+
+describe("the CAVE demo", () => {
+    async function started(frames = 30) {
+        const { demo } = await import("../examples/cave/demo.js");
+        const runtime = boot();
+        runtime.run(demo);
+        runtime.step(frames);
+        return runtime;
+    }
+
+    /** The name table as the screen shows it, a row at a time. */
+    function names(runtime: Runtime): Uint8Array {
+        const base = runtime.screen.pageBase(runtime.screen.displayPage);
+        return runtime.bios.system.vdp.vram.slice(base, base + 32 * 24);
+    }
+
+    it("runs in SCREEN 4, with the cave scrolling and the score held still", async () => {
+        const runtime = await started();
+        expect(runtime.screen.mode.name).toBe("G3");
+        expect(runtime.scroll.mask).toBe(true);
+        expect(runtime.scroll.bands.map((band) => band.top)).toEqual([0, 176]);
+        expect(runtime.scroll.bands[1]!.x).toBe(0);
+        const x = runtime.scroll.x;
+        runtime.step(8);
+        expect(runtime.scroll.x).toBe(x + 8);
+        expect(runtime.bgm.playing).toBe(true);
+    });
+
+    it("rebuilds the whole screen every frame and queues nothing", async () => {
+        const { CHAR, PLAY_ROWS } = await import("../examples/cave/demo.js");
+        const runtime = await started();
+        const shown = names(runtime);
+        // Rock above, rock below, and the score in the font along the bottom.
+        expect([CHAR.ROCK, CHAR.CEILING]).toContain(shown[0]);
+        expect(shown[(PLAY_ROWS - 1) * 32]).toBe(CHAR.ROCK);
+        const score = String.fromCharCode(...shown.slice(PLAY_ROWS * 32 + 1, PLAY_ROWS * 32 + 6));
+        expect(score).toBe("SCORE");
+        expect(runtime.gfx.pending).toBe(0);
+    });
+
+    it("animates the lava by rewriting one character, not the screen", async () => {
+        const { CHAR } = await import("../examples/cave/demo.js");
+        const runtime = await started();
+        const vram = runtime.bios.system.vdp.vram;
+        const lava = CHAR.LAVA * 8;
+        const before = vram.slice(lava, lava + 8);
+        runtime.step(6);
+        expect(vram.slice(lava, lava + 8)).not.toEqual(before);
+    });
+
+    it("flies on Z, and crashes into the ceiling when held up", async () => {
+        const { state } = await import("../examples/cave/demo.js");
+        const runtime = await started();
+        runtime.input.setButton(BUTTON.A, true);
+        runtime.step(1);
+        runtime.input.setButton(BUTTON.A, false);
+        runtime.step(1);
+        expect(state.phase).toBe("flying");
+
+        runtime.input.setButton(BUTTON.UP, true);
+        for (let i = 0; i < 120 && state.phase === "flying"; ++i) runtime.step(1);
+        runtime.input.setButton(BUTTON.UP, false);
+        expect(state.phase).toBe("crashed");
+        expect(state.crashY).toBeLessThan(8 * 8);
+    });
+});

@@ -82,6 +82,13 @@ export const EXAMPLES: readonly Example[] = [
         summary: "A demo in SCREEN 3, the mode nobody used: 64x48 blocks of 4x4 pixels. The whole picture is 2048 bytes, so every block of it is recomputed every frame, while the palette rotates underneath and R23 scrolls the lot a quarter of a block at a time. The readout is four sprites, which is all a line of SCREEN 3 will show.",
         controls: "X for the next pattern - they change on their own every four bars",
         load: async () => (await import("./haze/demo.js")).demo
+    },
+    {
+        id: "cave",
+        title: "CAVE",
+        summary: "A flight through a cave in SCREEN 4, where there is no framebuffer at all: the screen is 32x24 character codes, and every frame the whole of it is thrown away and built again - rock, moss, lava, crystals and score - then handed over as 768 bytes. That is the PCG's trick, the reason MSX1 games could fill the screen with a moving world: a bitmap mode needs the blitter for two frames to clear itself once. The cave slides a pixel at a time on the V9958's horizontal scroll over a name table used as a ring, the score held still in a band of its own. The lava boils and the crystals glint with nobody touching the screen: every cell of them is one character, and rewriting its 16 bytes of pattern and colour moves them all. Collision is reading the name table back.",
+        controls: "Z to fly \u00b7 arrows / WASD to steer \u00b7 crystals are ten points, rock and lava are the end",
+        load: async () => (await import("./cave/demo.js")).demo
     }
 ];
 
