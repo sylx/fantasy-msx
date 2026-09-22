@@ -78,7 +78,7 @@ describe("the character modes", () => {
         for (const mode of ["G2", "G3"] as const) {
             const bios = machine(mode);
             const { tiles, screen } = bios;
-            tiles.define(1, ["22222222", "33333333", "2.2.2.2.", "........", "", "", "", ""]);
+            tiles.defineMulticolor(1, ["22222222", "33333333", "2.2.2.2.", "........", "", "", "", ""]);
             tiles.put(0, 0, 1);
             screen.frame();
             const green = swatch(bios, 2), light = swatch(bios, 3), backdrop = swatch(bios, 1);
@@ -94,13 +94,13 @@ describe("the character modes", () => {
     it("refuses a row of three colours", () => {
         const { tiles, screen } = createBios();
         screen.setMode("G3");
-        expect(() => tiles.define(0, ["12300000"])).toThrow(/row 0 has more than two colours/);
+        expect(() => tiles.defineMulticolor(0, ["12300000"])).toThrow(/row 0 has more than two colours/);
     });
 
     it("keeps a bank for each third of the screen", () => {
         const bios = machine("G3");
         const { tiles, screen } = bios;
-        tiles.define(5, SOLID, { bank: 1 });
+        tiles.defineMulticolor(5, SOLID, { bank: 1 });
         tiles.put(0, 0, 5);         // bank 0: nothing defined
         tiles.put(0, 8, 5);         // bank 1
         screen.frame();
@@ -113,7 +113,7 @@ describe("the character modes", () => {
     it("scrolls down into the rows below the screen, drawn from the fourth bank", () => {
         const bios = machine("G2");
         const { tiles, screen, scroll } = bios;
-        tiles.define(5, SOLID, { bank: 3 });
+        tiles.defineMulticolor(5, SOLID, { bank: 3 });
         tiles.put(0, 28, 5);
         scroll.y = 28 * 8;
         screen.frame();
@@ -125,7 +125,7 @@ describe("the character modes", () => {
     it("flip name tables, patterns shared", () => {
         const bios = machine("G1");
         const { tiles, screen } = bios;
-        tiles.define(8, SOLID);
+        tiles.defineMulticolor(8, SOLID);
         screen.useDoubleBuffer();
         tiles.put(0, 0, 8);         // on the hidden table
         screen.frame();
@@ -140,7 +140,7 @@ describe("the character modes", () => {
     it("scroll across two name tables with the V9958", () => {
         const bios = machine("G3");
         const { tiles, screen, scroll } = bios;
-        tiles.define(8, SOLID);
+        tiles.defineMulticolor(8, SOLID);
         scroll.wide = true;
         tiles.put(40, 0, 8);        // the right-hand table of the pair
         expect(system(bios)[screen.pageBase(1)] | system(bios)[screen.pageBase(1) + 8]).toBe(8);

@@ -41,9 +41,10 @@ same position an MSX program's VBlank handler occupies.
 | host  | canvas blit, keyboard, gamepads, mouse, audio, file drops, 60Hz clock | done |
 | L0 core | VDP, PSG, OPLL (vendored from WebMSX) | done |
 | L1 API | typed register/VRAM/port access | done |
+| L1 API | the PCG: pattern, colour and name tables of SCREEN 1, 2 and 4 | done |
 | L2 BIOS | drawing and sprites | done |
 | L2 BIOS | scroll: R23 down, the V9958's R26/R27 across, bands on the line interrupt | done |
-| L2 BIOS | tiles: SCREEN 1, 2 and 4 - patterns, colours and name tables | done |
+| L2 BIOS | tiles: SCREEN 1, 2 and 4 on paged name tables, a whole screen a frame | done |
 | L2 BIOS | music: MML and a frame-driven driver | done |
 | L2 BIOS | images: a URL in, VRAM out, reduced to the mode | done |
 | L2 BIOS | text: the host's fonts, rasterised outside and carried in | done |
@@ -208,50 +209,111 @@ the fractional part and corrupt the pixel sharing the byte.
 
 ## Characters: SCREEN 1, 2 and 4
 
-The MSX1's screens are not bitmaps. A screen is 32x24 character codes, and what
-a code looks like is eight bytes of pattern you are free to redefine - the PCG.
-Rewriting the whole screen is 768 bytes and costs nothing; redefining a
-pattern changes every cell that uses it at once. `tiles` is that, in the three
-modes that have it:
+**The fastest screen this machine has is the oldest one.** In SCREEN 1, 2 and 4
+the screen is not pixels but 32x24 character codes - 768 bytes - and each code
+is drawn from eight bytes of pattern you are free to redefine: the PCG. So:
+
+- **Redraw the whole screen every frame.** 768 bytes is nothing. The bitmap
+  modes' 27KB takes the blitter two to seventeen frames to clear once
+  (see [Drawing takes time](#drawing-takes-time-and-you-can-see-it)); a
+  character screen is rebuilt from scratch and on the glass before the next
+  vertical sync, every time, with nothing half-drawn. A Z80 managed the same
+  768 bytes in about a third of a frame, which is why MSX1 games scroll whole
+  playfields and bitmap MSX2 games mostly do not.
+- **Animate by redefining.** Change a pattern and every cell using it changes
+  at once: 8 bytes for all the water on the screen to ripple.
+- **Keep game state and screen the same thing.** A map is a grid of codes, and
+  so is the screen. Collision is `get(x, y)`.
 
 | Mode | MSX-BASIC | Colour | Sprites |
 |------|-----------|--------|---------|
 | G1 | SCREEN 1 | one pair for each group of eight codes | mode 1: one colour, four to a line |
-| G2 | SCREEN 2 | one pair for every row of every character | mode 1 |
+| G2 | SCREEN 2 | one pair for every row of every character - "multicolour" | mode 1 |
 | G3 | SCREEN 4 | as G2 | mode 2: a colour a line, eight to a line |
+
+Every row of a character is two colours, one for its set bits and one for the
+rest, and colour 0 is not black but a hole the backdrop shows through.
+
+### Defining characters
 
 ```ts
 screen.setMode("G3");                   // or "G1", "G2"
 tiles.loadFont({ foreground: 15 });     // the machine's font into 32-126
-tiles.clear();                          // every cell a space
-tiles.print(2, 1, "SCORE 000100");
 
-tiles.define(128, [                     // hex digits are colours, "." is the backdrop
+tiles.define(128, [                     // one colour: anything but "." is set
+    "..####..",
+    ".#....#.",
+    // ... 8 rows
+], 11, 0);                              // yellow on the backdrop
+
+tiles.defineMulticolor(129, [           // hex digits are colours, "." is 0
     "44444444",
-    "4ffffff4",                          // each row: at most two colours
+    "4ffffff4",                         // at most two colours a row
     "4f7777f4",
     // ...
 ]);
-tiles.fill(0, 20, 32, 4, 128);
+tiles.defineMulticolor(130, art, { palette: { "#": 15, o: 8 } });
 ```
 
-`setPattern` and `setColor` / `setRowColors` write the tables separately;
-`define` works both out from a coloured bitmap and throws on a row with a
-third colour. In G1 the rule is two colours for the whole character, and they
-colour its group of eight - that is the mode, not the API.
+`setPattern`, `setPatterns` (many at once), `setColor` and `setRowColors`
+write the tables directly. `defineMulticolor` throws on a row with a third
+colour, naming it. In G1 the rule is two colours for the whole character, and
+they colour its group of eight - that is the mode, not the API.
 
 G2 and G3 cut the screen into thirds, each with its own 256 patterns and
-colours. Left alone, every definition goes to all of them and a character
-looks the same anywhere; `{ bank: 1 }` writes just the middle third, which is
-how a screen gets more than 256 different characters. There is a fourth bank:
-the name table is 32 rows deep, the 256 lines R23 scrolls round, and the 8
-rows below the screen are drawn from it.
+colours: banks. Left alone, every definition goes to all of them and a
+character looks the same anywhere; a `bank` argument writes one, which is how a
+screen gets more than 256 different characters. There is a fourth: the name
+table is 32 rows deep, the 256 lines R23 scrolls round, and the 8 rows below
+the screen are drawn from it.
+
+### Placing them: a whole frame at a time
+
+`put`, `get`, `print` (a `"\n"` goes down a row), `putMap` (one string or code
+array per row), `fill`, `clear` and `shift` (the MSX1's character scroll, a
+cell at a time) work on the screen directly - and on a `NameBuffer`, a name
+table in RAM. The idiom is the one MSX games used, a copy of the screen in RAM
+blasted across at VBlank:
+
+```ts
+const frame = new NameBuffer();         // 32x24; 32x32 for the whole table
+
+draw({ tiles }) {
+    frame.clear(32);
+    frame.putMap(0, 0, level.rowsAround(camera));      // the playfield
+    for (const e of enemies) frame.put(e.x, e.y, e.code);
+    frame.print(0, 23, `SCORE ${score}`);
+    tiles.transfer(frame);              // 768 bytes, this frame, whole
+}
+```
 
 A page in these modes is a name table, so `screen.useDoubleBuffer()` and
 `flip()` swap what is shown whole, and the scroll's bands and `wide` work as
 they do on a bitmap - `wide` pairs two tables into a plane 64 characters
-across, which `put` and `print` address directly. Name tables are written on
-`screen.drawPage`, as `gfx` draws.
+across, which `tiles` addresses as one. `tiles` writes `screen.drawPage`, as
+`gfx` does. For smooth scrolling, move the display with R23 (and the V9958's
+R26/R27) and redraw only the row or column coming into view.
+
+### Without the BIOS
+
+`system.pcg` is the same thing at the chip level (src/api/pcg.ts): it writes
+wherever R2-R4 point, so it works on `vdp.setMode`'s own layout - MSX-BASIC's,
+with the name table inside the fourth bank, where `pcg.banks` is 3 and the
+fourth is left alone - or on one of your own.
+
+```ts
+const { vdp, pcg, machine } = createSystem();
+vdp.setMode("G2");
+vdp.setDisplayEnabled(true);
+pcg.defineMulticolor(1, ["22222222", "33333333" /* ... */]);
+pcg.print(0, 0, [1, 1, 1, 1]);
+machine.frame();
+```
+
+`parsePattern` and `parseMulticolor` do the bitmap reading without touching
+VRAM, for tools and tests.
+
+### What the character modes do not have
 
 `gfx`, `image`, `text` and `console` need a framebuffer and throw here.
 `sprites` works in all three, with what sprite mode 1 leaves in G1 and G2: a

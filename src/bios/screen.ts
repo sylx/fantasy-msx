@@ -9,7 +9,7 @@
 // which is the 256 lines R23 scrolls round. Flipping one is still a write to
 // R2, so double buffering and scroll bands work on them unchanged.
 
-import { type PaletteColor, type ScreenModeName, type Vdp } from "../api/index.js";
+import { isPatternMode, type PaletteColor, type ScreenModeName, type Vdp } from "../api/index.js";
 import type { FantasyMachine } from "../core/machine.js";
 import { Scroll } from "./scroll.js";
 
@@ -19,13 +19,6 @@ import { Scroll } from "./scroll.js";
  * 0xD400 of 0x10000 - and this is the gap that leaves.
  */
 const SPRITE_TABLE_OFFSET = 0x0c00;
-
-/** The modes built from 8x8 characters: SCREEN 1, 2 and 4. */
-export type PatternModeName = "G1" | "G2" | "G3";
-
-export function isPatternMode(name: ScreenModeName): name is PatternModeName {
-    return name === "G1" || name === "G2" || name === "G3";
-}
 
 /**
  * Where the pattern modes keep their tables. Not MSX-BASIC's layout, which
@@ -79,8 +72,8 @@ export class Screen {
      * Sets up a screen. Geometry reaches the raster at the next vertical sync,
      * so the frame you call this in still renders with the old borders.
      *
-     * G1, G2 and G3 get their tables where `tiles` expects them (see
-     * `PATTERN_TABLES`). VRAM is left as it was, so whatever the last mode put
+     * G1, G2 and G3 get their tables laid out as `PATTERN_TABLES` says, with
+     * room for every bank and eight name tables. VRAM is left as it was, so whatever the last mode put
      * there shows as characters until `tiles` is given something to draw.
      */
     setMode(name: ScreenModeName = "G4"): void {

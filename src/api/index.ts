@@ -6,12 +6,18 @@
 
 import { FantasyMachine } from "../core/machine.js";
 import { Opll } from "./opll.js";
+import { Pcg } from "./pcg.js";
 import { Psg } from "./psg.js";
 import { Vdp } from "./vdp.js";
 
 export { Vdp, VdpCommands, type TableLayout } from "./vdp.js";
 export { Psg, type Channel, ENVELOPE, MIXER, PSG_R, TONE_CLOCK, USE_ENVELOPE } from "./psg.js";
 export { Opll, type OpllChannel, BLOCK_BITS, INSTRUMENT, OPLL_R, RHYTHM, pitchToFrequency } from "./opll.js";
+export {
+    Pcg, NameBuffer, CellGrid, isPatternMode, parsePattern, parseMulticolor, colorPair, bankOfRow,
+    NAME_COLUMNS, NAME_ROWS, SCREEN_ROWS, BANK_ROWS,
+    type MulticolorCharacter, type PatternModeName
+} from "./pcg.js";
 export * from "./v9938.js";
 export { FantasyMachine, type Frame } from "../core/machine.js";
 
@@ -21,13 +27,17 @@ export interface System {
     readonly vdp: Vdp;
     readonly psg: Psg;
     readonly opll: Opll;
+    /** The pattern modes' tables, wherever the VDP points. Only usable in G1, G2 and G3. */
+    readonly pcg: Pcg;
 }
 
 export function createSystem(machine: FantasyMachine = new FantasyMachine()): System {
+    const vdp = new Vdp(machine.vdp);
     return {
         machine,
-        vdp: new Vdp(machine.vdp),
+        vdp,
         psg: new Psg(machine.psg),
-        opll: new Opll(machine.opll)
+        opll: new Opll(machine.opll),
+        pcg: new Pcg(vdp)
     };
 }

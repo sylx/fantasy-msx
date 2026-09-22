@@ -26,8 +26,8 @@
 // turn sprites off for its lines, which the handler does with R8's SPD bit
 // the same way it does the scroll: `split(0, { sprites: false })`.
 
-import { S, S1, type Vdp } from "../api/index.js";
-import { isPatternMode, type Screen } from "./screen.js";
+import { isPatternMode, S, S1, type Vdp } from "../api/index.js";
+import type { Screen } from "./screen.js";
 
 /** Lines round the plane, whatever the screen height: R23 is eight bits. */
 export const PLANE_HEIGHT = 256;

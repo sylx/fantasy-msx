@@ -33,11 +33,8 @@ export {
     type Coverage, type ResolvedStyle, type TextAlign, type TextBox,
     type TextImage, type TextRasteriser, type TextStyle
 } from "./text.js";
-export { Screen, PATTERN_TABLES, isPatternMode, type PatternModeName, type SpriteTables } from "./screen.js";
-export {
-    Tiles, TILE_COLUMNS, TILE_ROWS, bankOfRow,
-    type DefineOptions, type FontOptions, type TileOptions
-} from "./tiles.js";
+export { Screen, PATTERN_TABLES, type SpriteTables } from "./screen.js";
+export { Tiles, type FontOptions } from "./tiles.js";
 export { Scroll, PLANE_HEIGHT, type BandOptions, type ScrollBand } from "./scroll.js";
 export {
     Sprites, SPRITE_COUNT, SPRITE_FLAGS, splitMulticolor,
@@ -93,7 +90,7 @@ export function createBios(system: System = createSystem()): Bios {
         scroll: screen.scroll,
         gfx,
         sprites: new Sprites(system.vdp, screen),
-        tiles: new Tiles(system.vdp, screen),
+        tiles: new Tiles(system.pcg, screen, system.vdp.vram),
         image: new Images(screen, gfx),
         text: new Typesetter(gfx, screen),
         console: new Console(gfx, screen),
