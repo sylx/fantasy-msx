@@ -20,6 +20,7 @@ const px = Math.round;
 export class Graphics {
     /** Null means "the whole screen", which follows the mode when it changes. */
     private clipRect: Rect | null = null;
+    private reach = false;
 
     constructor(
         private readonly screen: Screen,
@@ -32,8 +33,25 @@ export class Graphics {
      * is already on the page when it returns.
      */
     get now(): Raster {
-        this.immediate.setTarget(this.pageBase(), this.clip);
+        this.immediate.setTarget(this.pageBase(), this.clip, this.reach);
         return this.immediate;
+    }
+
+    /**
+     * Lets drawing reach below the screen, into the lines of the page that only
+     * a scroll shows - 212 to 255 in a 212-line mode, since R23 wraps at 256.
+     * That is where a vertical scroll's incoming line goes while nobody can see
+     * it. On the page that holds the sprite tables it stops short of them.
+     *
+     * Off by default: the whole screen, and every clip, stops at the screen's
+     * last line.
+     */
+    get offscreen(): boolean {
+        return this.reach;
+    }
+
+    set offscreen(on: boolean) {
+        this.reach = on;
     }
 
     // --- Queue state ------------------------------------------------------
@@ -84,7 +102,7 @@ export class Graphics {
             x: x0,
             y: y0,
             width: Math.min(this.screen.width, x + width) - x0,
-            height: Math.min(this.screen.height, y + height) - y0
+            height: Math.min(256, y + height) - y0
         };
     }
 
@@ -93,16 +111,19 @@ export class Graphics {
         this.clipRect = null;
     }
 
+    /** The clip as it applies to the draw page now: never past the lines drawing may reach. */
     get clip(): Readonly<Rect> {
-        return this.clipRect ?? this.fullPage();
+        const full = this.fullPage();
+        const clip = this.clipRect;
+        if (!clip) return full;
+        return { ...clip, height: Math.max(0, Math.min(clip.y + clip.height, full.height) - clip.y) };
     }
 
     // --- Primitives -------------------------------------------------------
 
     clear(color = 0): void {
-        this.blitter.push(new FillJob(
-            this.pageBase(), this.fullPage(), 0, 0, this.screen.width, this.screen.height, color, this.pack
-        ));
+        const full = this.fullPage();
+        this.blitter.push(new FillJob(this.pageBase(), full, 0, 0, full.width, full.height, color, this.pack));
     }
 
     pixel(x: number, y: number, color: number): void {
@@ -240,7 +261,8 @@ export class Graphics {
     }
 
     private fullPage(): Rect {
-        return { x: 0, y: 0, width: this.screen.width, height: this.screen.height };
+        const height = this.reach ? this.screen.pageLines(this.screen.drawPage) : this.screen.height;
+        return { x: 0, y: 0, width: this.screen.width, height };
     }
 }
 

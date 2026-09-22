@@ -42,6 +42,8 @@ const px = Math.round;
 export class Raster {
     private readonly vram: Uint8Array;
     private clipRect: Rect;
+    /** Whether the lines below the screen are drawable (Graphics' `offscreen`). */
+    private reach = false;
 
     /** VRAM address of the page being written. Set by whoever owns this rasteriser. */
     base: number;
@@ -58,9 +60,15 @@ export class Raster {
     }
 
     /** Points this rasteriser at a page and a clip rectangle in one go. */
-    setTarget(base: number, clip: Rect): void {
+    setTarget(base: number, clip: Rect, offscreen = false): void {
         this.base = base;
         this.clipRect = clip;
+        this.reach = offscreen;
+    }
+
+    /** Lines of `page` this rasteriser may touch: the screen, or with `offscreen` the page's picture lines. */
+    private linesOf(page: number): number {
+        return this.reach ? this.screen.pageLines(page) : this.screen.height;
     }
 
     private get stride(): number {
@@ -79,10 +87,14 @@ export class Raster {
 
     // --- Primitives -------------------------------------------------------
 
-    /** Fills the whole page, ignoring the clip rectangle. */
+    /**
+     * Fills the whole page, ignoring the clip rectangle: the screen's lines, or
+     * with `offscreen` every picture line of the page.
+     */
     clear(color = 0): void {
         const start = this.base;
-        this.vram.fill(this.replicate(color), start, start + this.screen.height * this.stride);
+        const page = Math.round(start / (this.screen.mode.pageSize || 1));
+        this.vram.fill(this.replicate(color), start, start + this.linesOf(page) * this.stride);
     }
 
     pixel(x: number, y: number, color: number): void {
@@ -94,7 +106,7 @@ export class Raster {
 
     getPixel(x: number, y: number, page = this.screen.drawPage): number {
         x = px(x); y = px(y);
-        if (x < 0 || y < 0 || x >= this.screen.width || y >= this.screen.height) return 0;
+        if (x < 0 || y < 0 || x >= this.screen.width || y >= this.linesOf(page)) return 0;
         return this.readPixel(this.screen.pageBase(page) + y * this.stride, x);
     }
 

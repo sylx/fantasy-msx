@@ -91,6 +91,22 @@ export class Screen {
         return (page % this.vdp.mode.pages) * this.vdp.mode.pageSize;
     }
 
+    /**
+     * How many lines of a page hold picture: every line R23 can scroll into
+     * view (256, whatever the screen height), except on the page that holds the
+     * sprite tables, which stops at the line they start on. `gfx.offscreen`
+     * draws down to here. Outside the bitmap modes, just the screen.
+     */
+    pageLines(page: number): number {
+        const mode = this.vdp.mode;
+        if (!mode.bitmap || !mode.bytesPerLine) return mode.height;
+        const lines = Math.min(256, mode.pageSize / mode.bytesPerLine);
+        const base = this.pageBase(page);
+        const tables = this.tables.colors;
+        if (tables < base || tables >= base + mode.pageSize) return lines;
+        return Math.min(lines, Math.floor((tables - base) / mode.bytesPerLine));
+    }
+
     get displayPage(): number {
         return this.display;
     }

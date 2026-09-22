@@ -231,6 +231,23 @@ sync. A sprite straddling two bands with different offsets is torn between
 them, as it is on the chip. The horizontal scroll never moves sprites, so x
 needs nothing.
 
+The other half of that bug is the **ghost**. A sprite is drawn wherever its Y
+meets the line being drawn plus R23, and a band with a different R23 is
+looking at different page lines - so a sprite well down a scrolled playfield
+can turn up in the status bar as well, whenever its page line comes round
+into the bar's. A band can switch sprites off for its own lines, which the
+line interrupt does with R8's SPD bit as it does the scroll:
+
+```ts
+scroll.split(0, { page: 0, sprites: false });    // no sprites, and so no ghosts, in the bar
+const field = scroll.split(24, { page: 2 });
+```
+
+A sprite reaching up into such a band from the one below is written against
+the band that shows it, so it slides out from under the bar in one piece.
+`sprites.setEnabled` still turns them all off; a band can only take them
+away.
+
 Two things the hardware insists on:
 
 - **The left edge.** R26 scrolls in whole groups of eight columns and R27
@@ -242,6 +259,19 @@ Two things the hardware insists on:
   plane that includes page 0 will scroll them into view. In SCREEN 5 there
   are pages 2 and 3 to use instead; in SCREEN 7 and 8 there are only two
   pages, and a plane that scrolls vertically has to live with them.
+
+**Drawing where only a scroll looks.** Drawing stops at the screen's last line,
+but a vertical scroll brings the rest of the page into view - lines 212 to
+255 in a 212-line mode - and that is exactly where the line about to scroll
+in has to be drawn while nobody can see it. `gfx.offscreen = true` lets
+`gfx` and `gfx.now` reach them. On page 0 it stops short of the sprite
+tables; `screen.pageLines(page)` says how far a page goes.
+
+```ts
+gfx.offscreen = true;
+screen.setDrawPage(2);
+gfx.now.hline(0, (255 - row) & 255, 256, color);  // the next line in, at the top
+```
 
 The scroll writes nothing until it is first used, so a program setting R23 or
 R26 through `vdp` by hand keeps them. `screen.setScroll(lines)` is the same as

@@ -305,3 +305,145 @@ describe("sprites under a scroll", () => {
         expect(bios.system.vdp.vram[bios.screen.spriteTables.attributes + 8]).toBe(216);
     });
 });
+
+describe("bands that hide sprites", () => {
+    /** A solid 16x16 sprite 0 in colour 15, its top on screen line `y`. */
+    function block(bios: Bios, y: number): void {
+        bios.sprites.setSize(16);
+        bios.sprites.setPattern(0, new Array(16).fill(0xffff));
+        bios.sprites.set(0, { x: 40, y, pattern: 0, color: 15 });
+        bios.sprites.setActiveCount(1);
+    }
+
+    it("show none on their own lines", () => {
+        const bios = machine();
+        const ink = inkOf(bios);
+        bios.scroll.split(0, { sprites: false });
+        bios.scroll.split(100);
+        block(bios, 50);
+        shown(bios, 0, 0);
+        expect(inkRows(bios, 45, ink)).toEqual([]);
+
+        bios.sprites.move(0, 40, 120);
+        shown(bios, 0, 0);
+        expect(inkRows(bios, 45, ink)).toEqual(Array.from({ length: 16 }, (_, i) => 120 + i));
+    });
+
+    it("keep a scrolled sprite's ghost out of a status bar", () => {
+        // The field looks 200 lines further down the page, so a sprite on field
+        // line 60 is written at page line 259 - line 3, which the bar shows.
+        const ghostly = (hide: boolean) => {
+            const bios = machine();
+            const ink = inkOf(bios);
+            bios.scroll.split(0, hide ? { sprites: false } : {});
+            bios.scroll.split(12, { y: 200, page: 2 });
+            block(bios, 60);
+            shown(bios, 0, 0);
+            return inkRows(bios, 45, ink);
+        };
+        const field = Array.from({ length: 16 }, (_, i) => 60 + i);
+        expect(ghostly(false)).toEqual([...Array.from({ length: 8 }, (_, i) => 4 + i), ...field]);
+        expect(ghostly(true)).toEqual(field);
+    });
+
+    it("let a sprite slide out from under them in one piece", () => {
+        const bios = machine();
+        const ink = inkOf(bios);
+        bios.scroll.split(0, { sprites: false });
+        bios.scroll.split(12, { y: 90, page: 2 });
+        block(bios, 4);                                      // top 8 lines under the bar
+        shown(bios, 0, 0);
+        expect(inkRows(bios, 45, ink)).toEqual(Array.from({ length: 8 }, (_, i) => 12 + i));
+    });
+
+    it("park a sprite that lies wholly inside them", () => {
+        // Written against the bar's y it would come out on field line 30.
+        const bios = machine();
+        const ink = inkOf(bios);
+        bios.scroll.split(0, { sprites: false });
+        bios.scroll.split(24, { y: 211, page: 2 });
+        block(bios, 2);
+        shown(bios, 0, 0);
+        expect(inkRows(bios, 45, ink)).toEqual([]);
+    });
+
+    it("leave sprites.setEnabled in charge of the rest", () => {
+        const bios = machine();
+        const ink = inkOf(bios);
+        const hud = bios.scroll.split(0, { sprites: false });
+        bios.scroll.split(100);
+        block(bios, 120);
+        bios.sprites.setEnabled(false);
+        shown(bios, 0, 0);
+        expect(inkRows(bios, 45, ink)).toEqual([]);
+
+        bios.sprites.setEnabled(true);
+        shown(bios, 0, 0);
+        expect(inkRows(bios, 45, ink)).toHaveLength(16);
+
+        // Once no band hides them, SPD goes back to what setEnabled said.
+        hud.sprites = undefined;
+        bios.sprites.move(0, 40, 20);
+        shown(bios, 0, 0);
+        expect(inkRows(bios, 45, ink)).toEqual(Array.from({ length: 16 }, (_, i) => 20 + i));
+    });
+
+    it("are somewhere hidden sprites may park", () => {
+        const bios = machine();
+        const { scroll, sprites, screen } = bios;
+        // The bar shows page lines 214-229, right where a sprite would park.
+        scroll.split(0, { y: 214, sprites: false });
+        scroll.split(16, { y: 0 });
+        sprites.hide(0);
+        expect(bios.system.vdp.vram[screen.spriteTables.attributes]).toBe(213);
+    });
+});
+
+describe("drawing off the screen", () => {
+    const line = (bios: Bios, page: number, y: number) => bios.system.vdp.vram[page * 0x8000 + y * 128 + 10];
+
+    it("stops at the screen's last line unless asked", () => {
+        const bios = machine();
+        bios.screen.setDrawPage(2);
+        bios.gfx.now.fillRect(0, 200, 256, 56, 15);
+        expect(line(bios, 2, 211)).toBe(0xff);
+        expect(line(bios, 2, 212)).toBe(0);
+        expect(bios.gfx.clip.height).toBe(212);
+    });
+
+    it("reaches every line R23 can bring into view with offscreen", () => {
+        const bios = machine();
+        bios.gfx.offscreen = true;
+        bios.screen.setDrawPage(2);
+        expect(bios.gfx.clip.height).toBe(256);
+        bios.gfx.now.fillRect(0, 200, 256, 56, 15);
+        expect(line(bios, 2, 212)).toBe(0xff);
+        expect(line(bios, 2, 255)).toBe(0xff);
+        expect(bios.gfx.getPixel(10, 240)).toBe(15);
+    });
+
+    it("stops short of the sprite tables on page 0", () => {
+        const bios = machine();
+        const { gfx, screen, system } = bios;
+        const tables = system.vdp.vram.slice(0x7400, 0x8000);
+        gfx.offscreen = true;
+        screen.setDrawPage(0);
+        expect(screen.pageLines(0)).toBe(232);
+        gfx.now.fillRect(0, 200, 256, 56, 15);
+        gfx.now.clear(15);
+        expect(line(bios, 0, 231)).toBe(0xff);
+        expect(system.vdp.vram.slice(0x7400, 0x8000)).toEqual(tables);
+    });
+
+    it("goes through the blitter too", () => {
+        const bios = machine();
+        bios.gfx.offscreen = true;
+        bios.screen.setDrawPage(3);
+        bios.gfx.setClip(0, 220, 256, 100);
+        bios.gfx.fillRect(0, 0, 256, 256, 15);
+        for (let i = 0; i < 20 && bios.gfx.busy; ++i) bios.screen.frame();
+        expect(line(bios, 3, 219)).toBe(0);
+        expect(line(bios, 3, 220)).toBe(0xff);
+        expect(line(bios, 3, 255)).toBe(0xff);
+    });
+});

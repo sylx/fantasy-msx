@@ -660,8 +660,9 @@ function enter(ctx: Context, index: number): void {
 
     sprites.hideAll();
     scroll.unsplit();
-    // The top band is the status bar: page 0, held still.
-    scroll.split(0, { x: 0, y: 0, page: 0 });
+    // The top band is the status bar: page 0, held still, and no sprites - a
+    // sprite's page line coming round into the bar's would show there too.
+    scroll.split(0, { x: 0, y: 0, page: 0, sprites: false });
     screen.setPalette(scene.palette);
     scene.enter(ctx);
     shown = "";

@@ -17,11 +17,14 @@
 // is armed for the line before each band, and the handler runs in the CPU's
 // time slice at the end of it.
 //
-// The one thing a band cannot choose is its sprites. They are composited by
-// the same raster, so R23 moves them along with the picture. `Sprites` takes
-// its offsets from here and writes Y already corrected, so a sprite placed at
-// a screen line appears on that line; one that straddles two bands with
-// different offsets is torn between them, as it is on the hardware.
+// Sprites are composited by the same raster, so R23 moves them along with the
+// picture. `Sprites` takes its offsets from here and writes Y already
+// corrected, so a sprite placed at a screen line appears on that line; one
+// that straddles two bands with different offsets is torn between them, as it
+// is on the hardware. Worse, a sprite whose page line comes round into another
+// band's lines turns up there too - a ghost in the status bar. So a band can
+// turn sprites off for its lines, which the handler does with R8's SPD bit
+// the same way it does the scroll: `split(0, { sprites: false })`.
 
 import { S, S1, type Vdp } from "../api/index.js";
 import type { Screen } from "./screen.js";
@@ -42,12 +45,22 @@ export interface ScrollBand {
      * `wide` on, a page stands for the pair it belongs to: 0 and 1, 2 and 3.
      */
     page?: number;
+    /**
+     * False hides every sprite on the band's lines (R8's SPD, switched on the
+     * line interrupt). A status bar over a scrolling field wants it: otherwise
+     * a sprite whose page line comes round into the bar's lines shows up there
+     * too. A sprite reaching into such a band from one that shows sprites is
+     * placed against the band that shows it, so it slides in cleanly. Left out,
+     * sprites show as `sprites.setEnabled` has them.
+     */
+    sprites?: boolean;
 }
 
 export interface BandOptions {
     x?: number;
     y?: number;
     page?: number;
+    sprites?: boolean;
 }
 
 export class Scroll {
@@ -63,6 +76,10 @@ export class Scroll {
      * R23 or R26 by hand is not overwritten at every vertical sync.
      */
     private engaged = false;
+    /** What `sprites.setEnabled` last asked for. Bands can only take sprites away. */
+    private spritesWanted = true;
+    /** Whether the last band applied had R8's SPD in its charge. */
+    private ownsSprites = false;
 
     constructor(private readonly vdp: Vdp, private readonly screen: Screen) {}
 
@@ -165,6 +182,7 @@ export class Scroll {
         if (options.x !== undefined) band.x = options.x;
         if (options.y !== undefined) band.y = options.y;
         if (options.page !== undefined) band.page = options.page;
+        if (options.sprites !== undefined) band.sprites = options.sprites;
         this.engaged = true;
         return band;
     }
@@ -186,6 +204,24 @@ export class Scroll {
         return band;
     }
 
+    /**
+     * The band a sprite `height` lines tall with its top on screen line `line`
+     * is written against: the one covering its top line, unless that band hides
+     * sprites - then the first band further down that shows them and begins
+     * within the sprite, so its lower part is drawn in the right place there.
+     * Null when the sprite lies wholly in bands that hide sprites: written
+     * against one of those it would be a ghost in some other band, so it is
+     * parked instead.
+     */
+    spriteBand(line: number, height: number): ScrollBand | null {
+        const band = this.at(line);
+        if (band.sprites !== false) return band;
+        for (const below of this.list) {
+            if (below.top > line && below.top < line + height && below.sprites !== false) return below;
+        }
+        return null;
+    }
+
     /** Where a screen pixel is in the plane, through whichever band covers it. */
     toPlane(x: number, y: number): { x: number; y: number } {
         const band = this.at(y);
@@ -196,16 +232,17 @@ export class Scroll {
     }
 
     /**
-     * The first of `height` page lines that no band shows - somewhere a sprite
-     * can be parked without turning up in some other band. Looks from just
-     * below the bottom band onwards, and skips 208 and 216, which as a sprite's
-     * Y would end the sprite list.
+     * The first of `height` page lines that no band shows sprites on -
+     * somewhere a sprite can be parked without turning up in some other band.
+     * Looks from just below the bottom band onwards, and skips 208 and 216,
+     * which as a sprite's Y would end the sprite list.
      */
     unseenLine(height: number): number {
         const lines = this.screen.height;
         const shown = new Uint8Array(PLANE_HEIGHT);
         for (let i = 0; i < this.list.length; ++i) {
             const band = this.list[i];
+            if (band.sprites === false) continue;
             const end = Math.min(lines, this.list[i + 1]?.top ?? lines);
             for (let line = band.top; line < end; ++line) shown[(line + band.y) & 0xff] = 1;
         }
@@ -226,6 +263,16 @@ export class Scroll {
     /** Whether the scroll has been used, and so owns R23, R26, R27 and R19. */
     get active(): boolean {
         return this.engaged;
+    }
+
+    /**
+     * Whether sprites are wanted at all, for the bands to take away from.
+     * `sprites.setEnabled` calls this; call that instead.
+     * @internal
+     */
+    setSpritesEnabled(on: boolean): void {
+        this.spritesWanted = on;
+        this.vdp.setSprites({ enabled: on });
     }
 
     /**
@@ -255,6 +302,14 @@ export class Scroll {
         this.offset = band.y & 0xff;
         this.vdp.setVerticalOffset(this.offset);
         this.vdp.setHorizontalOffset(Math.round(band.x * 256 / this.screen.width));
+
+        // R8's SPD is left alone unless a band hides sprites - and put back the
+        // once when the last such band goes, so it does not stay off.
+        const hiding = this.list.some((b) => b.sprites === false);
+        if (hiding || this.ownsSprites) {
+            this.vdp.setSprites({ enabled: this.spritesWanted && band.sprites !== false });
+            this.ownsSprites = hiding;
+        }
 
         // R2 is left alone unless something asks for a page, since in the
         // pattern modes it is not a page at all but the name table.

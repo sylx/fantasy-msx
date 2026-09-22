@@ -76,8 +76,9 @@ export class Sprites {
         this.vdp.setSprites({ size, magnified });
     }
 
+    /** All sprites on or off. A scroll band can still hide them on its own lines. */
     setEnabled(enabled: boolean): void {
-        this.vdp.setSprites({ enabled });
+        this.screen.scroll.setSpritesEnabled(enabled);
     }
 
     /**
@@ -188,14 +189,22 @@ export class Sprites {
      * parked where one is looking would turn up in it.
      */
     private parking(): number {
-        return this.screen.scroll.unseenLine(this.size * (this.magnified ? 2 : 1));
+        return this.screen.scroll.unseenLine(this.height);
     }
 
-    private writeY(index: number, parking = 0): void {
-        // The VDP draws a sprite one line below its stored Y.
-        let y = this.placed[index] === PLACED.SHOWN
-            ? this.lines[index] - 1 + this.screen.scroll.at(this.lines[index]).y
-            : parking - 1;
+    /** Lines a sprite covers on screen. */
+    private get height(): number {
+        return this.size * (this.magnified ? 2 : 1);
+    }
+
+    private writeY(index: number, parking?: number): void {
+        // The VDP draws a sprite one line below its stored Y. A sprite wholly
+        // inside bands that hide sprites has no band to be written against, and
+        // goes where hidden ones go.
+        const band = this.placed[index] === PLACED.SHOWN
+            ? this.screen.scroll.spriteBand(this.lines[index], this.height)
+            : null;
+        let y = band ? this.lines[index] - 1 + band.y : (parking ?? this.parking()) - 1;
         // 216 ends the list and takes every later sprite with it. One line of
         // error is the lesser loss.
         y &= 0xff;
