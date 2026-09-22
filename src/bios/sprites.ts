@@ -7,16 +7,28 @@
 // Mode 2 gives every sprite line its own colour, so a sprite can be shaded
 // without spending a second sprite on it. Eight sprites per scanline is the
 // hard limit; the ninth is dropped and flagged in S#0.
+//
+// A sprite's Y is a line of the page, not of the screen, so R23 carries the
+// sprites along with the picture. Positions here are screen lines: each Y is
+// written with the vertical scroll of the band it lands in added back, and
+// written again at every vertical sync in case the scroll has moved since.
 
-import { R1, S, S0, type Vdp } from "../api/index.js";
+import { S, S0, type Vdp } from "../api/index.js";
 import type { Screen } from "./screen.js";
 
 export const SPRITE_COUNT = 32;
 
 /** Y value that stops the VDP processing any further sprites this frame. */
 const END_OF_LIST = 216;
-/** Y value that parks one sprite below a 212-line screen without ending the list. */
-const OFF_SCREEN = 213;
+/** What the attribute table's Y byte of each sprite is standing for. */
+const PLACED = {
+    /** Written by someone else - the end of the list, say. Left alone. */
+    RAW: 0,
+    /** On screen at a screen line. */
+    SHOWN: 1,
+    /** Parked on page lines no band shows. */
+    HIDDEN: 2
+} as const;
 
 /** Per-line colour byte flags. */
 export const SPRITE_FLAGS = {
@@ -42,6 +54,10 @@ export interface SpriteState {
 export class Sprites {
     private readonly vram: Uint8Array;
     private size: 8 | 16 = 8;
+    private magnified = false;
+    private readonly placed = new Uint8Array(SPRITE_COUNT);
+    /** Screen line of each shown sprite, before the scroll is added back. */
+    private readonly lines = new Int16Array(SPRITE_COUNT);
 
     constructor(private readonly vdp: Vdp, private readonly screen: Screen) {
         this.vram = vdp.vram;
@@ -56,6 +72,7 @@ export class Sprites {
     /** 8x8 or 16x16, optionally with every pixel doubled. */
     setSize(size: 8 | 16, magnified = false): void {
         this.size = size;
+        this.magnified = magnified;
         this.vdp.setSprites({ size, magnified });
     }
 
@@ -100,8 +117,7 @@ export class Sprites {
     /** Places a sprite. `y` is the screen line its top row appears on. */
     set(index: number, state: SpriteState): void {
         const attribute = this.tables.attributes + index * 4;
-        // The VDP draws a sprite one line below its stored Y.
-        this.vram[attribute] = (state.y - 1) & 0xff;
+        this.place(index, state.y);
         this.vram[attribute + 1] = state.x & 0xff;
         this.vram[attribute + 2] = this.size === 16 ? state.pattern & 0xfc : state.pattern & 0xff;
         this.vram[attribute + 3] = 0;
@@ -119,9 +135,8 @@ export class Sprites {
 
     /** Moves a sprite without touching its pattern or colours. */
     move(index: number, x: number, y: number): void {
-        const attribute = this.tables.attributes + index * 4;
-        this.vram[attribute] = (y - 1) & 0xff;
-        this.vram[attribute + 1] = x & 0xff;
+        this.place(index, y);
+        this.vram[this.tables.attributes + index * 4 + 1] = x & 0xff;
     }
 
     /** Replaces the per-line colours of a sprite already placed. */
@@ -132,7 +147,8 @@ export class Sprites {
 
     /** Parks one sprite off-screen. The rest keep being drawn. */
     hide(index: number): void {
-        this.vram[this.tables.attributes + index * 4] = OFF_SCREEN;
+        this.placed[index] = PLACED.HIDDEN;
+        this.writeY(index, this.parking());
     }
 
     hideAll(): void {
@@ -144,7 +160,47 @@ export class Sprites {
      * and the only way to tell the chip not to look at the rest at all.
      */
     setActiveCount(count: number): void {
-        if (count < SPRITE_COUNT) this.vram[this.tables.attributes + count * 4] = END_OF_LIST;
+        if (count < SPRITE_COUNT) {
+            this.placed[count] = PLACED.RAW;
+            this.vram[this.tables.attributes + count * 4] = END_OF_LIST;
+        }
+    }
+
+    /**
+     * Rewrites every sprite's Y against the scroll as it stands. The BIOS does
+     * this at each vertical sync, so a sprite stays on its screen line while
+     * the picture moves under it.
+     */
+    follow(): void {
+        const parking = this.parking();
+        for (let i = 0; i < SPRITE_COUNT; ++i) if (this.placed[i] !== PLACED.RAW) this.writeY(i, parking);
+    }
+
+    private place(index: number, y: number): void {
+        this.placed[index] = PLACED.SHOWN;
+        this.lines[index] = Math.round(y);
+        this.writeY(index);
+    }
+
+    /**
+     * Where hidden sprites go: page lines no band shows. Below the screen when
+     * nothing scrolls - but a band can point anywhere in the page, and a sprite
+     * parked where one is looking would turn up in it.
+     */
+    private parking(): number {
+        return this.screen.scroll.unseenLine(this.size * (this.magnified ? 2 : 1));
+    }
+
+    private writeY(index: number, parking = 0): void {
+        // The VDP draws a sprite one line below its stored Y.
+        let y = this.placed[index] === PLACED.SHOWN
+            ? this.lines[index] - 1 + this.screen.scroll.at(this.lines[index]).y
+            : parking - 1;
+        // 216 ends the list and takes every later sprite with it. One line of
+        // error is the lesser loss.
+        y &= 0xff;
+        if (y === END_OF_LIST) ++y;
+        this.vram[this.tables.attributes + index * 4] = y;
     }
 
     /**

@@ -8,6 +8,7 @@ import { Ime } from "./ime.js";
 import { Images } from "./image.js";
 import { Raster } from "./raster.js";
 import { Screen } from "./screen.js";
+import type { Scroll } from "./scroll.js";
 import { SoundDriver } from "./sound.js";
 import { Sprites } from "./sprites.js";
 import { Typesetter } from "./text.js";
@@ -32,6 +33,7 @@ export {
     type TextImage, type TextRasteriser, type TextStyle
 } from "./text.js";
 export { Screen, type SpriteTables } from "./screen.js";
+export { Scroll, PLANE_HEIGHT, type BandOptions, type ScrollBand } from "./scroll.js";
 export { Sprites, SPRITE_COUNT, SPRITE_FLAGS, type SpriteState } from "./sprites.js";
 export { CHAR_HEIGHT, CHAR_WIDTH, FONT, glyphOffset } from "./font.js";
 export { SoundDriver } from "./sound.js";
@@ -45,6 +47,8 @@ export {
 export interface Bios {
     readonly system: System;
     readonly screen: Screen;
+    /** Where the display looks into the plane, split into bands if you like. The same as `screen.scroll`. */
+    readonly scroll: Scroll;
     /** Drawing. Queued, and paced by the hardware. */
     readonly gfx: Graphics;
     readonly sprites: Sprites;
@@ -76,6 +80,7 @@ export function createBios(system: System = createSystem()): Bios {
     const bios: Bios = {
         system,
         screen,
+        scroll: screen.scroll,
         gfx,
         sprites: new Sprites(system.vdp, screen),
         image: new Images(screen, gfx),
@@ -86,9 +91,16 @@ export function createBios(system: System = createSystem()): Bios {
         bgm: new SoundDriver(system.psg, system.opll)
     };
 
-    // The driver runs on the vertical interrupt, which is where an MSX music
-    // driver hooked itself and why tempo lands on whole frames.
-    system.machine.onFrame = () => bios.bgm.tick();
+    // The vertical sync loads the scroll's top band and the sprites' Y against
+    // it. The music driver runs there too, which is where an MSX music driver
+    // hooked itself and why tempo lands on whole frames.
+    system.machine.onFrame = () => {
+        bios.scroll.vsync();
+        if (bios.scroll.active) bios.sprites.follow();
+        bios.bgm.tick();
+    };
+    // The line interrupt is how the scroll's bands change partway down.
+    system.machine.onInterrupt = () => bios.scroll.interrupt();
     bios.sprites.setSize(16);
     bios.sprites.setEnabled(true);
 

@@ -1,10 +1,13 @@
-// V9938 hardware constants.
+// V9938 hardware constants, and the three registers the V9958 adds to them.
 //
 // Nothing here is an abstraction - these are the register numbers, bit
 // positions and opcodes as documented for the chip. If you know the V9938,
 // you already know this file.
 
-/** Control registers. The V9938 has 47 (R0..R46); all are write-only. */
+/**
+ * Control registers. The V9938 has 47 (R0..R46), all write-only; the V9958
+ * fills in R25..R27, which the V9938 left unassigned.
+ */
 export const R = {
     MODE_0: 0,              // Mx (M3-M5), IE1, IE2, DG
     MODE_1: 1,              // Mx (M1, M2), IE0, BL (display enable), SI, MAG
@@ -30,6 +33,10 @@ export const R = {
     COLOR_BURST_2: 21,
     COLOR_BURST_3: 22,
     VERTICAL_OFFSET: 23,
+    // V9958 only
+    MODE_4: 25,             // CMD, VDS, YAE, YJK, WTE, MSK (left mask), SP2 (two-page scroll)
+    HORIZONTAL_OFFSET_HIGH: 26, // H08-H03: scroll left in units of 8 pixels
+    HORIZONTAL_OFFSET_LOW: 27,  // H02-H00: then shift right by 0-7 pixels
     // Command engine
     SX: 32, SX_HIGH: 33,
     SY: 34, SY_HIGH: 35,
@@ -77,10 +84,18 @@ export const R9 = {
     PAL: 0x02               // NT
 } as const;
 
+/** R25 bits. V9958 only. */
+export const R25 = {
+    YJK: 0x08,              // YJK colour encoding in GRAPHIC7
+    YAE: 0x10,              // YJK and palette mixed
+    MSK: 0x02,              // hide the leftmost 8 pixels, where a horizontal scroll brings new columns in
+    SP2: 0x01               // horizontal scroll across two pages side by side, 512 pixels of plane
+} as const;
+
 /** Status registers, selected through R15 and read from port 0x99. */
 export const S = {
     INTERRUPT: 0,           // F (VBlank), 5S, C (collision), and the 5th sprite number
-    STATUS: 1,              // FH (line interrupt), light pen, VDP id
+    STATUS: 1,              // FH (line interrupt), light pen, VDP id (bits 1-5: 0 = V9938, 2 = V9958)
     COMMAND: 2,             // CE (command executing), TR, VR, HR, BD, EO
     COLLISION_X_LOW: 3,
     COLLISION_X_HIGH: 4,
@@ -96,6 +111,11 @@ export const S0 = {
     VBLANK: 0x80,           // F
     FIFTH_SPRITE: 0x40,     // 5S
     COLLISION: 0x20         // C
+} as const;
+
+/** S#1 bits. Reading S#1 clears FH, while the line interrupt is enabled. */
+export const S1 = {
+    LINE_INTERRUPT: 0x01    // FH
 } as const;
 
 /** S#2 bits. */

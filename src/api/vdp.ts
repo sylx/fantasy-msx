@@ -9,7 +9,7 @@
 
 import type { VDP as VdpPorts } from "../core/types.js";
 import {
-    ARG, CMD, DEFAULT_PALETTE, MODES, OP, R, R0, R1, R8, R9, S, S2,
+    ARG, CMD, DEFAULT_PALETTE, MODES, OP, R, R0, R1, R8, R9, R25, S, S2,
     type PaletteColor, type ScreenMode, type ScreenModeName
 } from "./v9938.js";
 
@@ -216,9 +216,42 @@ export class Vdp {
         if (options.line !== undefined) this.write(R.LINE_INTERRUPT, options.line & 0xff);
     }
 
-    /** Scrolls the display vertically by whole lines. Wraps within the page. */
+    /**
+     * R23: which line of the page the display starts on. Wraps at 256, not at
+     * the screen height, and it moves the sprites too - their Y is a line of the
+     * page, not of the screen. The line interrupt is compared against the same
+     * scrolled count.
+     */
     setVerticalOffset(lines: number): void {
         this.write(R.VERTICAL_OFFSET, lines & 0xff);
+    }
+
+    /**
+     * R26/R27, V9958 only: which column of the page the display starts on, in
+     * 256ths of the screen width - so a unit is two pixels in the 512-wide
+     * modes. The chip takes it as a coarse scroll left in whole bytes-of-eight
+     * and a fine shift back right, which is why the leftmost few columns show
+     * the backdrop unless `MSK` covers them. Sprites stay where they are.
+     *
+     * Wraps within one page, or within two with `SP2` set in R25.
+     */
+    setHorizontalOffset(columns: number): void {
+        const width = this.regs[R.MODE_4] & R25.SP2 ? 512 : 256;
+        const x = ((columns % width) + width) % width;
+        const coarse = (x + 7) >> 3;
+        this.write(R.HORIZONTAL_OFFSET_HIGH, coarse & 0x3f);
+        this.write(R.HORIZONTAL_OFFSET_LOW, (coarse * 8 - x) & 0x07);
+    }
+
+    /**
+     * R25's scroll bits, V9958 only. `mask` blanks the leftmost 8 pixels, where
+     * a horizontal scroll brings its new column in. `twoPages` makes the
+     * horizontal scroll run across an even page and the odd one after it, a
+     * plane 512 pixels wide - R2 must then point at the odd page.
+     */
+    setScrollMode(options: { mask?: boolean; twoPages?: boolean }): void {
+        if (options.mask !== undefined) this.writeBits(R.MODE_4, R25.MSK, options.mask ? R25.MSK : 0);
+        if (options.twoPages !== undefined) this.writeBits(R.MODE_4, R25.SP2, options.twoPages ? R25.SP2 : 0);
     }
 
     // --- Palette ---------------------------------------------------------

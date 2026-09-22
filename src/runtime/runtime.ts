@@ -11,7 +11,7 @@
 // the VDP composites every scanline for nothing.
 
 import type { Bios } from "../bios/index.js";
-import type { Console, Graphics, Images, Ime, Screen, SoundDriver, Sprites, Typesetter } from "../bios/index.js";
+import type { Console, Graphics, Images, Ime, Screen, Scroll, SoundDriver, Sprites, Typesetter } from "../bios/index.js";
 import type { Frame } from "../core/machine.js";
 import type { Crt } from "../host/crt.js";
 import { Input } from "./input.js";
@@ -22,6 +22,11 @@ import { Pointer } from "./pointer.js";
 export interface Context {
     readonly bios: Bios;
     readonly screen: Screen;
+    /**
+     * Hardware scrolling: R23 down, the V9958's R26/R27 across, and bands that
+     * change them partway down the screen on the line interrupt.
+     */
+    readonly scroll: Scroll;
     readonly gfx: Graphics;
     readonly sprites: Sprites;
     /** Loading pictures from URLs, reduced to what the screen mode can show. */
@@ -138,6 +143,10 @@ export class Runtime implements Context {
 
     get screen(): Screen {
         return this.bios.screen;
+    }
+
+    get scroll(): Scroll {
+        return this.bios.scroll;
     }
 
     get gfx(): Graphics {

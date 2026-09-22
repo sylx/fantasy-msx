@@ -28,7 +28,8 @@ if (!globalThis.wmsx) globalThis.wmsx = {};
 // so that 262 lines x 228 cycles lands on exactly 60 Hz.
 if (!globalThis.wmsx.CPU) globalThis.wmsx.CPU = { BASE_CLOCK: 3584160 };
 
-// The VDP compares its configured type against these. We only ever use MSX2.
+// The VDP compares its configured type against these. We only ever use MSX2,
+// with the VDP pinned to the MSX2+'s V9958 below.
 if (!globalThis.wmsx.Machine) globalThis.wmsx.Machine = {
     MACHINE_TYPE: { MSX1: 1, MSX2: 2, MSX2P: 3, MSXTR: 4 },
     // AudioSignal divides this by a chip's sample rate to pick its resampler:
@@ -40,10 +41,11 @@ if (!globalThis.wmsx.Machine) globalThis.wmsx.Machine = {
 
 if (!globalThis.WMSX) {
     globalThis.WMSX = {
-        // Machine profile. Fantasy MSX is MSX2-only, so this never varies.
+        // Machine profile. Fantasy MSX is an MSX2 whose VDP is the V9958 - a
+        // V9938 plus the MSX2+'s horizontal scroll registers - so this never varies.
         MACHINE: "MSX2J",
-        MACHINES_CONFIG: { MSX2J: { DESC: "Fantasy MSX (MSX2 / V9938)", TYPE: 2 } },
-        VDP_TYPE: 2,                    // 2 = V9938. Not "auto" - we pin it.
+        MACHINES_CONFIG: { MSX2J: { DESC: "Fantasy MSX (MSX2 / V9958)", TYPE: 2 } },
+        VDP_TYPE: 3,                    // 3 = V9958. Not "auto" - we pin it.
 
         // Debug switches the VDP consults at reset.
         DEBUG_MODE: 0,

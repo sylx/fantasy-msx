@@ -1040,3 +1040,86 @@ describe("the EDITOR demo", () => {
         expect(runtime.ime.composing).toBe(false);
     });
 });
+
+describe("the DRIFT demo", () => {
+    it("splits the screen into bands, with the status bar on page 0 and the field on pages 2 and 3", async () => {
+        const { demo } = await import("../examples/drift/demo.js");
+        const runtime = boot();
+        runtime.run(demo);
+        runtime.step(5);
+
+        const { scroll } = runtime;
+        expect(scroll.wide).toBe(true);
+        expect(scroll.planeWidth).toBe(512);
+        expect(scroll.bands[0]).toMatchObject({ top: 0, x: 0, y: 0, page: 0 });
+        // Four layers and a band for every line of the lake.
+        expect(scroll.bands).toHaveLength(1 + 4 + 36);
+        expect(scroll.bands.slice(1).every((band) => band.page === 2)).toBe(true);
+    });
+
+    it("moves the layers at different speeds", async () => {
+        const { demo } = await import("../examples/drift/demo.js");
+        const runtime = boot();
+        runtime.run(demo);
+        runtime.step(64);
+        const [, sky, , hills, ground] = runtime.scroll.bands;
+        expect(ground.x).toBeGreaterThan(hills.x);
+        expect(hills.x).toBeGreaterThan(sky.x);
+    });
+
+    it("streams the world into the plane as the camera roams", async () => {
+        const { demo } = await import("../examples/drift/demo.js");
+        const runtime = boot();
+        runtime.run(demo);
+        runtime.step(1);
+
+        runtime.input.setButton(BUTTON.B, true);
+        runtime.step(1);
+        runtime.input.setButton(BUTTON.B, false);
+        expect(runtime.scroll.bands).toHaveLength(2);
+
+        const field = runtime.scroll.bands[1];
+        const start = { x: field.x, y: field.y };
+        runtime.input.setButton(BUTTON.RIGHT, true);
+        runtime.input.setButton(BUTTON.DOWN, true);
+        runtime.step(240);
+
+        expect(field.x - start.x).toBeGreaterThan(256);
+        expect(field.y - start.y).toBeGreaterThan(256);
+
+        // Whatever the camera has crossed, every tile on screen has to be the
+        // world's tile for that spot - a seam sewn late or in the wrong cell
+        // would show up here as a tile from somewhere else.
+        const { TILE_BYTES, WORLD_SEED, WORLD_TILES, makeWorld } = await import("../examples/drift/demo.js");
+        const world = makeWorld(WORLD_SEED);
+        const vram = runtime.bios.system.vdp.vram;
+        const wrap = (v: number, n: number) => ((v % n) + n) % n;
+        const misplaced = () => {
+            const left = Math.floor(field.x / 8);
+            const top = Math.floor((field.y + 20) / 8);
+            let wrong = 0;
+            for (let row = top; row <= top + 24; ++row) {
+                for (let column = left; column <= left + 32; ++column) {
+                    const px = (column & 63) * 8;
+                    const at = (2 + (px >> 8)) * 0x8000 + (row & 31) * 8 * 128 + ((px & 255) >> 1);
+                    const want = TILE_BYTES[world[wrap(row, WORLD_TILES) * WORLD_TILES + wrap(column, WORLD_TILES)]];
+                    for (let line = 0; line < 8; ++line) {
+                        for (let b = 0; b < 4; ++b) if (vram[at + line * 128 + b] !== want[line * 4 + b]) { ++wrong; }
+                    }
+                }
+            }
+            return wrong;
+        };
+        expect(misplaced()).toBe(0);
+
+        // And back the other way, which sews the opposite edges.
+        runtime.input.setButton(BUTTON.RIGHT, false);
+        runtime.input.setButton(BUTTON.DOWN, false);
+        runtime.input.setButton(BUTTON.LEFT, true);
+        runtime.input.setButton(BUTTON.UP, true);
+        runtime.step(480);
+        expect(field.x).toBeLessThan(start.x - 256);
+        expect(field.y).toBeLessThan(start.y - 256);
+        expect(misplaced()).toBe(0);
+    });
+});

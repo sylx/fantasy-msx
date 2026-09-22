@@ -42,6 +42,7 @@ same position an MSX program's VBlank handler occupies.
 | L0 core | VDP, PSG, OPLL (vendored from WebMSX) | done |
 | L1 API | typed register/VRAM/port access | done |
 | L2 BIOS | drawing and sprites | done |
+| L2 BIOS | scroll: R23 down, the V9958's R26/R27 across, bands on the line interrupt | done |
 | L2 BIOS | music: MML and a frame-driven driver | done |
 | L2 BIOS | images: a URL in, VRAM out, reduced to the mode | done |
 | L2 BIOS | text: the host's fonts, rasterised outside and carried in | done |
@@ -168,6 +169,84 @@ Coordinates are whole pixels. Anything else is rounded to the nearest one on
 the way in, so positions worked out with `sin` and `cos` can be passed straight
 through - a fraction reaching the packing would otherwise pick its shift from
 the fractional part and corrupt the pixel sharing the byte.
+
+## Scrolling
+
+A scroll on this machine moves nothing in VRAM. The picture stays where it
+was drawn and the VDP is told where to start reading it: R23 for the line, and
+- on the V9958, which is the VDP this console has - R26 and R27 for the
+column. A few register writes a frame, against a blitter that needs three
+frames to clear the screen once.
+
+```ts
+const { scroll } = ctx;                          // also bios.scroll, screen.scroll
+
+scroll.set(camera.x, camera.y);                  // the whole screen
+scroll.mask = true;                              // R25 MSK: hide the ragged left edge
+scroll.wide = true;                              // R25 SP2: two pages side by side
+```
+
+What the display looks into is a **plane**, and it is bigger than the screen.
+R23 wraps at 256 lines whatever the screen height, so there are 44 lines below
+a 212-line screen that only a scroll ever shows. Across, one page is the
+screen's own width; `wide` joins an even page to the odd one after it for a
+plane twice that - `scroll.planeWidth` says which. Both axes wrap, so a plane
+is a ring: move forever in one direction and it comes round again.
+
+**Bands** are the part the registers alone do not give you. They are read as
+each line is drawn, so changing them partway down gives the lines below
+different values from the lines above - which is how a status bar holds still
+over a playfield, and how hills move at half the speed of the road in front of
+them.
+
+```ts
+scroll.split(0, { page: 0 });                    // the top band: a status bar on page 0
+const field = scroll.split(24, { page: 2 });     // from line 24 down: the playfield
+
+update() {
+    field.x = camera.x;                          // bands are plain objects; move them
+    field.y = camera.y - 24;                     // y is the plane line at the top of the *screen*
+}
+```
+
+On the real machine this is a line interrupt and a handler that rewrites the
+registers between two lines, and that is exactly what happens here. R19 is
+armed for the last line of each band, the VDP raises its interrupt at the end
+of that line, and the handler - `machine.onInterrupt`, in the CPU's seat -
+acknowledges it by reading S#1 and writes the next band's registers before the
+raster reaches it. A band can be one line tall. Nothing is being faked: turn
+the interrupt off and the bands stop.
+
+`y` means what R23 means, the plane line shown at the top of the screen, not
+of the band. That keeps one number for one register, and it is also what
+makes a band able to point a single line anywhere in the plane - see DRIFT's
+lake, below.
+
+**Sprites move with R23.** Their Y is a line of the page rather than of the
+screen, so a vertical scroll carries every sprite along with the picture. On
+real hardware that is a bug waiting in every scrolling game, and here it is
+dealt with: `sprites.set` and `sprites.move` take screen lines, add the scroll
+of the band they land in back on, and write the lot again at each vertical
+sync. A sprite straddling two bands with different offsets is torn between
+them, as it is on the chip. The horizontal scroll never moves sprites, so x
+needs nothing.
+
+Two things the hardware insists on:
+
+- **The left edge.** R26 scrolls in whole groups of eight columns and R27
+  then shifts the picture back right by up to seven pixels, leaving that many
+  columns of backdrop at the left. `mask` blanks the leftmost eight all the
+  time, so the edge is still rather than ragged.
+- **Pages.** A band can show any page, and `wide` spends two on a plane. The
+  sprite tables sit in the lines below the screen at the foot of page 0, so a
+  plane that includes page 0 will scroll them into view. In SCREEN 5 there
+  are pages 2 and 3 to use instead; in SCREEN 7 and 8 there are only two
+  pages, and a plane that scrolls vertically has to live with them.
+
+The scroll writes nothing until it is first used, so a program setting R23 or
+R26 through `vdp` by hand keeps them. `screen.setScroll(lines)` is the same as
+`scroll.y`. At the chip level there are `vdp.setVerticalOffset`,
+`vdp.setHorizontalOffset` and `vdp.setScrollMode`.
 
 ## Loading a picture
 
@@ -797,6 +876,33 @@ state. Open `/#seed`, or see [the demo's notes](examples/seed/README.md).
 npm run seed -- /tmp/seed.png /tmp/seed.wav  # six views and about 24 seconds of chip audio
 ```
 
+### DRIFT
+
+Scrolling, with nothing redrawn to make it move. Pages 2 and 3 are one plane
+512 pixels across and 256 down, and page 0 holds a status bar that stays put
+while everything under it slides - a split on the line interrupt. **X** switches
+between two scenes, **Z** turns the left-edge mask on and off, and left alone
+it changes scene every twenty seconds.
+
+VISTA is a dusk landscape in four layers - sky, a far range, hills, the road -
+each band at its own fraction of the camera's speed, which is all parallax is.
+**Left / right** change the speed. The lake below them is the one worth
+looking at: it gets a band on every one of its 36 lines. The reflection is the
+hills turned over and drawn in water colours into the 44 plane lines the
+screen never reaches. R23 points each line of lake at a line of it, 40 squeezed
+into 36 so it reads as a surface seen at an angle, and R26/R27 shakes each line
+a pixel or two either way. That is 41 bands and 40 interrupts a frame, and it
+costs the machine nothing.
+
+ROAM flies a balloon over a world 1024 pixels square, four times the plane.
+The plane is a ring buffer onto it: when a column or row of tiles is about to
+come into view it is written over the one that has just left, which is on the
+far side of the wrap from where the screen is looking, so the seam is never
+seen being sewn. The readout shows R23, R26 and R27 as the camera moves, and
+how many tiles came in that frame - usually none, 32 or 64. The balloon and the
+beacons are sprites placed in screen lines, and `sprites` puts R23 back on
+their Y.
+
 ### INK
 
 A game, because the machine's oddities only make sense once something is built
@@ -1258,7 +1364,13 @@ npm run music -- out.wav        # eight bars, five voices
 
 ## Machine profile
 
-Fixed, and not configurable: **MSX2, V9938, NTSC 60Hz, 128KB VRAM**.
+Fixed, and not configurable: **MSX2, V9958, NTSC 60Hz, 128KB VRAM**.
+
+The VDP is the MSX2+'s V9958 rather than the MSX2's V9938: the same chip with
+R25-R27 added, which is where the horizontal scroll lives. Nothing else of the
+MSX2+ comes with it: no kanji ROM, and no YJK in the BIOS, although R25 will
+select it if written by hand. A program that never touches R25-R27 cannot tell
+the difference, except by the chip's ID in S#1.
 
 ## Development
 

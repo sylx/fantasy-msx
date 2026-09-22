@@ -6,6 +6,7 @@
 
 import { type PaletteColor, type ScreenModeName, type Vdp } from "../api/index.js";
 import type { FantasyMachine } from "../core/machine.js";
+import { Scroll } from "./scroll.js";
 
 /**
  * Where the sprite tables sit inside page 0, measured back from the end of it.
@@ -26,7 +27,12 @@ export class Screen {
     private draw = 0;
     private tables: SpriteTables = spriteTablesFor(0x8000);
 
-    constructor(private readonly vdp: Vdp, private readonly machine: FantasyMachine) {}
+    /** Where the display looks into the plane, and the bands that split it. */
+    readonly scroll: Scroll;
+
+    constructor(private readonly vdp: Vdp, private readonly machine: FantasyMachine) {
+        this.scroll = new Scroll(vdp, this);
+    }
 
     /**
      * Where the sprite tables live. They stay put in page 0 while the
@@ -122,9 +128,12 @@ export class Screen {
         this.setDrawPage(1);
     }
 
-    /** Scrolls the display vertically. The page wraps at 256 lines, not 212. */
+    /**
+     * Scrolls the display vertically. The page wraps at 256 lines, not 212.
+     * The same as `scroll.y`, which is where the rest of scrolling lives.
+     */
     setScroll(lines: number): void {
-        this.vdp.setVerticalOffset(lines);
+        this.scroll.y = lines;
     }
 
     setBackdrop(color: number): void {

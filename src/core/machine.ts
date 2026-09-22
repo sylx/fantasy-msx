@@ -15,8 +15,12 @@ import type { AudioSignal, FrameSource, Monitor, OpllChip, PsgChip, VDP, VideoSi
 
 const wmsx = wmsxNamespace as WmsxNamespace;
 
-/** MSX2 (V9938). Matches WebMSX's MACHINES_CONFIG TYPE numbering. */
-const MACHINE_TYPE_MSX2 = 2;
+/**
+ * MSX2+, which is what selects the V9958: a V9938 with horizontal scroll
+ * registers added. Nothing else of the MSX2+ comes with it. Matches WebMSX's
+ * MACHINES_CONFIG TYPE numbering.
+ */
+const MACHINE_TYPE_MSX2P = 3;
 
 /** NTSC with V-sync off gives the TIMER pulldown: 262 lines per clock pulse, i.e. 1:1 frames. */
 const LINES_PER_FRAME = 262;
@@ -94,6 +98,13 @@ class CycleCounter {
      * done a little at a time.
      */
     onCycles: ((cycles: number) => void) | null = null;
+    /**
+     * The interrupt service routine. Called at the start of every time slice
+     * while the VDP holds its interrupt line low - level-triggered, as a Z80
+     * in IM 1 with interrupts enabled is - so it must acknowledge the source by
+     * reading the status register, or it is called again on the next slice.
+     */
+    onInterrupt: (() => void) | null = null;
 
     constructor() {
         this.busClockPulses = this.busClockPulses.bind(this);
@@ -103,6 +114,9 @@ class CycleCounter {
     }
 
     busClockPulses(quant: number): void {
+        // The Z80 takes an interrupt between instructions, never inside the VDP's
+        // own bookkeeping, so the routine runs here rather than from setINTChannel.
+        if (this.intPending && this.onInterrupt) this.onInterrupt();
         this.cycles += quant;
         if (this.onCycles) this.onCycles(quant);
     }
@@ -186,7 +200,7 @@ export class FantasyMachine {
         Object.assign(machine, { bus });
 
         this.vdp = new wmsx.VDP(machine, this.cpu, vSyncConnection);
-        this.vdp.setMachineType(MACHINE_TYPE_MSX2);
+        this.vdp.setMachineType(MACHINE_TYPE_MSX2P);
         this.vdp.setVideoStandard(wmsx.VideoStandard.NTSC);
         this.vdp.setVSynchMode(0);                       // off -> TIMER pulldown -> 262 lines/pulse
         this.vdp.getVideoSignal().connectMonitor(this.collector);
@@ -241,6 +255,21 @@ export class FantasyMachine {
 
     get onCycles(): ((cycles: number) => void) | null {
         return this.cpu.onCycles;
+    }
+
+    /**
+     * The interrupt handler: what the Z80 would have jumped to at 0x0038. It
+     * runs in the next time slice after the VDP raises its interrupt line, which
+     * for a line interrupt is the end of that scanline - early enough for a
+     * register written here to reach the next line. Level-triggered, so it must
+     * read the status register that raised it.
+     */
+    set onInterrupt(handler: (() => void) | null) {
+        this.cpu.onInterrupt = handler;
+    }
+
+    get onInterrupt(): (() => void) | null {
+        return this.cpu.onInterrupt;
     }
 
     /** Pulls the accumulated audio for the last frame from every connected chip. */

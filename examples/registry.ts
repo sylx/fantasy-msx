@@ -21,6 +21,13 @@ export const EXAMPLES: readonly Example[] = [
         load: async () => (await import("./seed/demo.js")).demo
     },
     {
+        id: "drift",
+        title: "DRIFT",
+        summary: "Hardware scrolling, with nothing redrawn to make it move. Pages 2 and 3 are one plane 512 pixels across and 256 down; R23 picks the line the display starts on, and the V9958's R26 and R27 the column. A line interrupt at the foot of each band rewrites them before the raster gets there, so the status bar holds still over a field that does not. VISTA is a dusk landscape in four layers at four speeds, over a lake with a band on every one of its 36 lines, each pointed at an upside-down reflection kept in the plane lines that never reach the screen. ROAM flies a balloon over a world four times the plane, streaming tiles into the wrap on the far side of where the screen is looking.",
+        controls: "arrows / WASD to steer (VISTA: left / right for the speed) \u00b7 X for the other scene \u00b7 Z to toggle the left-edge mask \u00b7 left alone, it changes scene every twenty seconds",
+        load: async () => (await import("./drift/demo.js")).demo
+    },
+    {
         id: "ink",
         title: "INK",
         summary: "A game. Shots fly off in the direction you are flying and burst into a gradient of ink where they land. Painted ground kills the drifters, but the blitter takes several frames to lay a splat down, so you shoot at where they are going.",
