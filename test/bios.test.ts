@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MODES, R } from "../src/api/index.js";
-import { createBios } from "../src/bios/index.js";
+import { createBios, SPRITE_FLAGS, splitMulticolor, type MulticolorSplit } from "../src/bios/index.js";
 import { pixelAt } from "./helpers.js";
 
 const WHITE = 0xffffffff;
@@ -258,6 +258,73 @@ describe("Sprites", () => {
         expect(system.vdp.vram[screen.spriteTables.colors + 0]).toBe(1);
         expect(system.vdp.vram[screen.spriteTables.colors + 3]).toBe(4);
         expect(system.vdp.vram[screen.spriteTables.colors + 4]).toBe(0);
+    });
+
+    // What the chip shows for row `y` of a split: A, B, or A|B where both are set.
+    const recompose = (split: MulticolorSplit, y: number, width = 8) =>
+        Array.from({ length: width }, (_, x) => {
+            const bit = 1 << (width - 1 - x);
+            return ((split.baseRows[y]! & bit) ? split.baseColors[y]! : 0)
+                | ((split.overlayRows[y]! & bit) ? split.overlayColors[y]! : 0);
+        });
+
+    it("splits a three-colour line into A, B and their OR", () => {
+        const split = splitMulticolor(["2466.4..", "", "", "", "", "", "", ""]);
+        expect(recompose(split, 0)).toEqual([2, 4, 6, 6, 0, 4, 0, 0]);
+        expect(split.baseRows[0]).toBe(0b0111_0100);        // 4 as the base covers four pixels, 2 only three
+    });
+
+    it("keeps a two-colour line in the base sprite when one colour contains the other", () => {
+        const split = splitMulticolor(["44..66..", "", "", "", "", "", "", ""]);
+        expect(recompose(split, 0)).toEqual([4, 4, 0, 0, 6, 6, 0, 0]);
+        expect(split.baseRows[0]).toBe(0b1100_1100);
+    });
+
+    it("reads characters through the palette before hex", () => {
+        const split = splitMulticolor(["#o7", "", "", "", "", "", "", ""], { "#": 15, o: 8 });
+        expect(recompose(split, 0)).toEqual([15, 8, 7, 0, 0, 0, 0, 0]);
+    });
+
+    it("refuses a line two sprites cannot colour", () => {
+        expect(() => splitMulticolor(["235.....", "", "", "", "", "", "", ""])).toThrow(/line 0 has colours 2, 3, 5/);
+        expect(() => splitMulticolor(["1248....", "", "", "", "", "", "", ""])).toThrow(/4 colours/);
+    });
+
+    it("draws the overlap of a multicolour sprite in the OR of its colours", () => {
+        const { gfx, sprites, screen, system } = createBios();
+        gfx.now.clear(0);
+        sprites.setSize(8);
+        const art = sprites.setMulticolorPattern(0, Array(8).fill("24662442"));
+        expect(art.overlay).toBe(1);
+        sprites.setMulticolor(0, { x: 64, y: 80, pattern: art });
+        sprites.setActiveCount(2);
+        expect(system.vdp.vram[screen.spriteTables.colors + 16] & SPRITE_FLAGS.COMPOSITE).toBeTruthy();
+        screen.frame();
+
+        const frame = system.machine.getFrame()!;
+        const palette = (x: number) => pixelAt(frame, MODES.G4, x, 84);
+        const reference = createBios();
+        const colorOf = (c: number) => {
+            reference.gfx.now.clear(c);
+            reference.screen.frame();
+            return pixelAt(reference.system.machine.getFrame()!, MODES.G4, 0, 0);
+        };
+        expect(palette(64)).toBe(colorOf(2));
+        expect(palette(65)).toBe(colorOf(4));
+        expect(palette(66)).toBe(colorOf(6));
+    });
+
+    it("moves and hides the overlay with its base", () => {
+        const { sprites, system, screen } = createBios();
+        const art = sprites.setMulticolorPattern(0, Array(8).fill("24662442"));
+        sprites.setMulticolor(3, { x: 10, y: 20, pattern: art });
+        sprites.move(3, 50, 60);
+        const attr = screen.spriteTables.attributes;
+        expect(system.vdp.vram[attr + 4 * 4 + 1]).toBe(50);
+        expect(system.vdp.vram[attr + 4 * 4]).toBe(system.vdp.vram[attr + 3 * 4]);
+        sprites.set(3, { x: 0, y: 0, pattern: 0, color: 1 });
+        sprites.move(3, 90, 60);
+        expect(system.vdp.vram[attr + 4 * 4 + 1]).toBe(50);
     });
 
     it("actually reaches the screen", () => {

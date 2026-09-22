@@ -165,6 +165,41 @@ screen.frame();
 Sprite colours may be given per line, which is a V9938 feature with no
 equivalent on an MSX1: one sprite, shaded, instead of two stacked.
 
+### Multicolour sprites
+
+A sprite is one colour to a line. Two sprites make three: mode 2's CC bit
+(`SPRITE_FLAGS.COMPOSITE`) ORs a sprite into the one numbered just before it
+wherever the two overlap, so a line shows colour A, colour B, and A|B. This is
+how V9938 games got colourful characters, and it is the way to draw one here -
+draw the art in colours and let the BIOS find the split:
+
+```ts
+const ship = sprites.setMulticolorPattern(0, [   // hex digits are colours, "." is clear
+    "......4444......",
+    ".....466664.....",
+    "....46622664....",
+    // ... 16 rows for a 16x16 sprite, 8 for 8x8
+]);
+sprites.setMulticolor(0, { x: 100, y: 60, pattern: ship });   // takes sprites 0 and 1
+sprites.move(0, 104, 60);                                     // the pair moves together
+```
+
+A palette maps any other character: `setMulticolorPattern(0, art, { "#": 15, o: 8 })`.
+
+The rule is the chip's: **each line may hold up to three colours, and when it
+holds three, one must be the OR of the other two** - 2, 4 and 6; 1, 8 and 9;
+8, 7 and 15. Pick the palette with that in mind: set the entries for A, B and
+A|B together with `screen.setPalette`, and the OR colour reads as a highlight or
+an outline rather than a coincidence. Every line picks its own trio, so a head
+and a body can be coloured differently. A line that breaks the rule throws,
+naming the line and its colours.
+
+The pattern takes two slots (`slot` and the next, or the next four for 16x16)
+and the sprite takes two numbers, both counting against eight to a line. Only
+the base sprite collides, so the split keeps as many pixels in it as the
+colours allow. `set` on either number breaks the pair. `splitMulticolor` does
+the split without touching VRAM, for tools or tests.
+
 Coordinates are whole pixels. Anything else is rounded to the nearest one on
 the way in, so positions worked out with `sin` and `cos` can be passed straight
 through - a fraction reaching the packing would otherwise pick its shift from
@@ -1295,8 +1330,9 @@ import { BUTTON, run, type Context } from "./src/index.js";
 run({
     init({ screen, gfx, sprites }: Context) {
         gfx.now.clear(1);                       // the boot screen cannot wait
-        sprites.setPatternFromBitmap(0, [...]);
-        sprites.setActiveCount(1);
+        const ship = sprites.setMulticolorPattern(0, [...]);   // A, B and A|B a line
+        sprites.setMulticolor(0, { x: 120, y: 100, pattern: ship });
+        sprites.setActiveCount(2);
     },
 
     update({ input, sprites }: Context) {

@@ -34,7 +34,10 @@ export {
 } from "./text.js";
 export { Screen, type SpriteTables } from "./screen.js";
 export { Scroll, PLANE_HEIGHT, type BandOptions, type ScrollBand } from "./scroll.js";
-export { Sprites, SPRITE_COUNT, SPRITE_FLAGS, type SpriteState } from "./sprites.js";
+export {
+    Sprites, SPRITE_COUNT, SPRITE_FLAGS, splitMulticolor,
+    type MulticolorPattern, type MulticolorSplit, type MulticolorState, type SpriteState
+} from "./sprites.js";
 export { CHAR_HEIGHT, CHAR_WIDTH, FONT, glyphOffset } from "./font.js";
 export { SoundDriver } from "./sound.js";
 export { charCells, textCells } from "./width.js";
